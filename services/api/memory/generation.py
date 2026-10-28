@@ -19,6 +19,14 @@ class MemorySuggestion(BaseModel):
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     reason: str = ""
 
+    @field_validator("location", "summary", "category", "reason", mode="before")
+    @classmethod
+    def coerce_none_to_empty(cls, v, info):
+        # El LLM a veces devuelve null en campos opcionales; normaliza a "".
+        if v is None:
+            return ""
+        return v
+
     @field_validator("confidence", mode="before")
     @classmethod
     def coerce_confidence(cls, v):
@@ -52,7 +60,7 @@ Si no hay base suficiente, dilo claramente. Nunca inventes politicas, ingredient
 Responde en el idioma de la pregunta y presenta cualquier propuesta en el idioma base elegido. Manten exactamente los montos USD/COP, sin conversiones.
 Para alergenos sigue literalmente las advertencias, nunca garantices cero riesgo de contaminacion cruzada.
 
-AUTOVALORACION: Devuelve should_store=true solo para (1) correcciones operativas recurrentes por location: horario, dia de entrega de proveedor o excepcion local; (2) contexto repetible de escalacion resuelta; o (3) preferencia de comunicacion de un gerente. No guardes datos personales de clientes de Brasa Points mas alla de lo estrictamente operativo, cifras de nomina o compensacion individual, ni hechos de una conversacion puntual sin patron repetible. Consultas puntuales (p. ej. ticket promedio de ayer), agradecimientos/cierres y traducciones de una vez deben tener should_store=false. Ante duda, false. Propon un solo hecho especifico y asigna categoria entre horarios, proveedores, incidentes_conocidos, preferencias, general. confidence debe ser un numero float entre 0.0 y 1.0 (ej: 0.9, 0.5, 0.2), NO texto como "alta" o "media".
+AUTOVALORACION: Devuelve should_store=true solo para (1) correcciones operativas recurrentes o duraderas por location: horario, dia de entrega de proveedor, excepcion local o disponibilidad permanente de un producto del menu; (2) contexto repetible de escalacion resuelta; o (3) preferencia de comunicacion de un gerente. Ejemplo: "Recuerda esto: dejamos de ofrecer La Ensalada Tropical en la sede de Medellin" es un cambio local duradero y debe generar una propuesta en categoria general; una falta temporal de inventario para hoy no debe guardarse. Una instruccion explicita de recordar algo indica la intencion del usuario: evalua el hecho con estas reglas y, si cumple, devuelve should_store=true. Eso NO es aprobacion para persistir; la API solicitara confirmacion antes de guardar. No descartes un hecho elegible solo porque el contexto RAG este vacio. No guardes datos personales de clientes de Brasa Points mas alla de lo estrictamente operativo, cifras de nomina o compensacion individual, ni hechos de una conversacion puntual sin patron reutilizable. Consultas puntuales (p. ej. ticket promedio de ayer), agradecimientos/cierres y traducciones de una vez deben tener should_store=false. Ante duda, false. Propon un solo hecho especifico y asigna categoria entre horarios, proveedores, incidentes_conocidos, preferencias, general. confidence debe ser un numero float entre 0.0 y 1.0 (ej: 0.9, 0.5, 0.2), NO texto como "alta" o "media".
 Devuelve JSON con answer y propuesta_memoria (should_store, summary, location, category, confidence, reason). La respuesta debe ofrecer la propuesta al usuario si should_store=true; la API agregara el texto de confirmacion en el idioma de la pregunta.
 
 MEMORIAS CONFIRMADAS (contexto independiente, no RAG):
