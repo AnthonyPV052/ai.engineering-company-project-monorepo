@@ -1,0 +1,31 @@
+{
+  "required_fields": [
+    "incidente_id",
+    "cliente_id",
+    "categoria",
+    "estado",
+    "fecha_creacion"
+  ],
+  "allowed_categories": [
+    "queja",
+    "solicitud",
+    "fallo_operativo"
+  ],
+  "allowed_states": [
+    "abierto",
+    "en_proceso",
+    "resuelto",
+    "cerrado"
+  ],
+  "csv_fields": [
+    "incidente_id",
+    "cliente_id",
+    "email_cliente",
+    "telefono_cliente",
+    "categoria",
+    "estado",
+    "prioridad",
+    "fecha_creacion",
+    "tiempo_resolucion_horas"
+  ]
+}

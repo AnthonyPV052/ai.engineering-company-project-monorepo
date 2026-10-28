@@ -1,0 +1,1 @@
+"""Tests para el pipeline de desempeño de negocio."""

@@ -1,0 +1,8 @@
+.env.local
+__pycache__/
+.env*
+.env
+.devcontainer/
+Telemetry-context.md
+*.local*
+agent-traces/

@@ -1,0 +1,164 @@
+services:
+  backend:
+    # The default bridge uses the host-provided resolver directly in this
+    # Codespaces environment. The user-defined brasaland-net DNS forwarder
+    # (127.0.0.11) fails to resolve external names here.
+    network_mode: bridge
+    build:
+      context: .
+      dockerfile: services/Dockerfile
+    container_name: brasaland-backend
+    volumes:
+      - ./services/api:/app
+      - ./services/reporting:/app/reporting
+      - ./data:/app/data
+      - ./docs/company-knowledge-base:/app/docs/company-knowledge-base:ro
+      - /app/.venv
+    ports:
+      - "8020:8020"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-dev-secret-key}
+      - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      - APP_BASE_URL=http://frontend:3000
+      - REDIS_URL=redis://host.docker.internal:6379/0
+      - QDRANT_URL=${QDRANT_URL:-http://host.docker.internal:6333}
+      - LLM_GATEWAY=${LLM_GATEWAY}
+      - LLM_API_KEY=${LLM_API_KEY}
+      - EMBED_MODEL=${EMBED_MODEL}
+      - GEN_MODEL=${GEN_MODEL:-litellm/madrid-spain/openrouter/deepseek/deepseek-v4-flash}
+      - EMBED_MODEL=${EMBED_MODEL}
+      - AGENT_RAG_RETRIEVAL_TIMEOUT_SECONDS=${AGENT_RAG_RETRIEVAL_TIMEOUT_SECONDS:-75}
+      - RAG_QDRANT_TIMEOUT_SECONDS=${RAG_QDRANT_TIMEOUT_SECONDS:-20}
+      - RAG_QDRANT_RETRIEVAL_ATTEMPTS=${RAG_QDRANT_RETRIEVAL_ATTEMPTS:-2}
+      - RAG_EMBEDDING_TIMEOUT_SECONDS=${RAG_EMBEDDING_TIMEOUT_SECONDS:-30}
+      - RAG_EMBEDDING_RETRIES=${RAG_EMBEDDING_RETRIES:-1}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - redis
+      - qdrant
+    command: ["uv", "run", "uvicorn", "main:app", "--reload", "--port", "8020", "--host", "0.0.0.0"]
+
+  worker:
+    # Keep external gateway DNS working consistently with the backend.
+    network_mode: bridge
+    build:
+      context: .
+      dockerfile: services/Dockerfile
+    container_name: brasaland-worker
+    volumes:
+      - ./services/api:/app
+      - ./services/reporting:/app/reporting
+      - ./data:/app/data
+      - /app/.venv
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=redis://host.docker.internal:6379/0
+      - QDRANT_URL=${QDRANT_URL:-http://host.docker.internal:6333}
+      - LLM_GATEWAY=${LLM_GATEWAY}
+      - LLM_API_KEY=${LLM_API_KEY}
+      - EMBED_MODEL=${EMBED_MODEL}
+      - GEN_MODEL=${GEN_MODEL:-litellm/madrid-spain/openrouter/deepseek/deepseek-v4-flash}
+      - EMBED_MODEL=${EMBED_MODEL}
+      - RAG_QDRANT_TIMEOUT_SECONDS=${RAG_QDRANT_TIMEOUT_SECONDS:-20}
+      - RAG_QDRANT_RETRIEVAL_ATTEMPTS=${RAG_QDRANT_RETRIEVAL_ATTEMPTS:-2}
+      - RAG_EMBEDDING_TIMEOUT_SECONDS=${RAG_EMBEDDING_TIMEOUT_SECONDS:-30}
+      - RAG_EMBEDDING_RETRIES=${RAG_EMBEDDING_RETRIES:-1}
+    depends_on:
+      - redis
+      - qdrant
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: ["uv", "run", "celery", "-A", "celery_app", "worker", "--loglevel=INFO"]
+
+  qdrant:
+    image: qdrant/qdrant:v1.15.5
+    container_name: brasaland-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    networks:
+      - brasaland-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: brasaland-redis
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--maxmemory-policy", "noeviction"]
+    networks:
+      - brasaland-net
+
+  flower:
+    image: mher/flower:2.0
+    container_name: brasaland-flower
+    ports:
+      - "5555:5555"
+    environment:
+      - CELERY_BROKER_URL=redis://host.docker.internal:6379/0
+      - CELERY_RESULT_BACKEND=redis://host.docker.internal:6379/0
+    depends_on:
+      - redis
+    networks:
+      - brasaland-net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: ["celery", "--broker=redis://host.docker.internal:6379/0", "flower", "--port=5555"]
+
+  frontend:
+    # Backend/worker use the default bridge to avoid brasaland-net's broken
+    # external DNS forwarder. Use the same bridge so the published backend
+    # port at 172.17.0.1:8020 is reachable from Next.js rewrites.
+    network_mode: bridge
+    build:
+      context: .
+      dockerfile: uis/Dockerfile
+    container_name: brasaland-frontend
+    volumes:
+      - ./uis/website:/app/uis/website
+      - ./src:/app/src
+      - /app/uis/website/node_modules
+    ports:
+      - "3000:3000"
+    environment:
+      - WATCHPACK_POLLING=true
+      # In some Codespaces/Linux Docker bridges, container-to-container traffic
+      # is blocked even though published ports remain reachable via gateway.
+      - API_UPSTREAM_URL=${API_UPSTREAM_URL:-http://172.17.0.1:8020}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - backend
+    command: ["npm", "run", "dev", "--", "-p", "3000"]
+
+  mcp-brasaland:
+    # Use the same default bridge so host.docker.internal works consistently.
+    network_mode: bridge
+    build:
+      context: .
+      dockerfile: mcps/brasaland/Dockerfile
+    container_name: brasaland-mcp
+    ports:
+      - "8100:8100"
+    environment:
+      - MCP_BRASALAND_HOST=0.0.0.0
+      - MCP_BRASALAND_PORT=8100
+      - MCP_BRASALAND_API_BASE_URL=http://host.docker.internal:8020
+      - MCP_BRASALAND_USE_FALLBACK_AUTH=true
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-dev-secret-key}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - backend
+
+networks:
+  brasaland-net:
+    name: brasaland-net
+    driver: bridge
+
+volumes:
+  qdrant_storage:

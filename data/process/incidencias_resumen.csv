@@ -1,0 +1,13 @@
+metrica,valor
+total_registros,100
+registros_validos,88
+registros_invalidos,12
+porcentaje_invalidos,12.0
+tiempo_promedio_resolucion_horas,19.18
+categoria:queja,30
+categoria:solicitud,28
+categoria:fallo_operativo,30
+estado:abierto,20
+estado:en_proceso,22
+estado:resuelto,24
+estado:cerrado,22

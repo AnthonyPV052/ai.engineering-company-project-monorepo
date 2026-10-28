@@ -1,0 +1,624 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Brasaland Telemetry Event Schemas",
+  "description": "Catálogo completo de esquemas de eventos de telemetría para el sistema de inventario de Brasaland. Incluye el envelope estándar y el allowlist de cada event_type.",
+  "version": "1.0.0",
+  "lastUpdated": "2026-08-26",
+
+  "definitions": {
+    "UUID": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+      "description": "UUID v4"
+    },
+    "DateTimeISO": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?Z$",
+      "description": "Fecha ISO 8601 en UTC"
+    },
+    "CountryCode": {
+      "type": "string",
+      "enum": ["CO", "US"],
+      "description": "Código de país: CO = Colombia, US = Estados Unidos"
+    },
+    "CurrencyCode": {
+      "type": "string",
+      "enum": ["COP", "USD"],
+      "description": "Código de moneda: COP = Peso colombiano, USD = Dólar estadounidense"
+    },
+    "LocationID": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 14,
+      "description": "Identificador del local de Brasaland (1-14)"
+    },
+    "ProductCategory": {
+      "type": "string",
+      "enum": ["meat", "produce", "sauce", "beverage", "packaging", "cleaning"],
+      "description": "Categoría de producto en el inventario"
+    },
+    "WasteReason": {
+      "type": "string",
+      "enum": ["expired", "kitchen_error", "theft_suspected"],
+      "description": "Causa de merma registrada"
+    },
+    "AttemptType": {
+      "type": "string",
+      "enum": ["api_direct_patch", "db_manual", "ui_bypass"],
+      "description": "Tipo de intento de modificación directa de stock"
+    },
+    "RejectReason": {
+      "type": "string",
+      "enum": ["no_endpoint", "invalid_operation", "unauthorized"],
+      "description": "Motivo del rechazo de edición directa"
+    },
+    "HTTPMethod": {
+      "type": "string",
+      "enum": ["GET", "POST", "PATCH", "DELETE", "PUT"],
+      "description": "Método HTTP"
+    },
+    "ErrorType": {
+      "type": "string",
+      "enum": ["validation_error", "not_found", "server_error", "unauthorized"],
+      "description": "Categoría de error de API"
+    },
+    "FrontendErrorType": {
+      "type": "string",
+      "enum": ["TypeError", "ReferenceError", "NetworkError", "ReactError"],
+      "description": "Tipo de error de frontend"
+    },
+    "IncidentCategory": {
+      "type": "string",
+      "enum": ["equipment_failure", "supply_issue", "customer_complaint", "staff_issue", "facility_issue", "pos_system", "delivery_issue", "other"],
+      "description": "Categoría de incidencia"
+    },
+    "IncidentOrigin": {
+      "type": "string",
+      "enum": ["customer", "branch", "internal"],
+      "description": "Origen de la incidencia"
+    },
+    "SearchSection": {
+      "type": "string",
+      "enum": ["products", "orders", "incidents", "suppliers"],
+      "description": "Sección donde se realiza una búsqueda"
+    },
+    "FilterType": {
+      "type": "string",
+      "enum": ["country", "category", "status", "text_query"],
+      "description": "Tipo de filtro usado en búsqueda"
+    }
+  },
+
+  "envelope": {
+    "type": "object",
+    "title": "Event Envelope",
+    "description": "Envelope estándar que todo evento de telemetría de Brasaland debe incluir. Proporciona trazabilidad, correlación y auditoría.",
+    "required": ["eventId", "timestamp", "sessionId", "userId", "eventType", "schemaVersion", "requestId", "properties"],
+    "properties": {
+      "eventId": {
+        "$ref": "#/definitions/UUID",
+        "description": "Identificador único del evento. Generado en el punto de captura. Permite deduplicación."
+      },
+      "timestamp": {
+        "$ref": "#/definitions/DateTimeISO",
+        "description": "Momento exacto en que ocurrió el evento (siempre UTC)."
+      },
+      "sessionId": {
+        "$ref": "#/definitions/UUID",
+        "description": "Identificador de sesión del usuario. Persiste desde login hasta logout o expiración."
+      },
+      "userId": {
+        "type": "string",
+        "description": "Identificador del usuario que generó el evento. Vacío para eventos anónimos (login fallido)."
+      },
+      "eventType": {
+        "type": "string",
+        "description": "Nombre del evento según taxonomía entidad_accion. Ej. inbound_order_created."
+      },
+      "schemaVersion": {
+        "type": "string",
+        "pattern": "^\\d+\\.\\d+$",
+        "description": "Versión del esquema de este event_type (Semver)."
+      },
+      "requestId": {
+        "type": "string",
+        "description": "Identificador de correlación que vincula el evento con la petición HTTP. UUID v4."
+      },
+      "properties": {
+        "type": "object",
+        "description": "Payload específico del evento. Solo contiene claves definidas en el allowlist de cada eventType.",
+        "default": {}
+      }
+    }
+  },
+
+  "eventSchemas": {
+    "inbound_order_created": {
+      "title": "Orden de entrada creada",
+      "description": "Se dispara cuando un local registra la llegada de mercancía de un proveedor.",
+      "classification": "obligatorio",
+      "domain": "inventario",
+      "trigger": "Backend, al completar POST /inventory/orders/inbound (después de db.commit()).",
+      "businessHypothesis": "Necesitamos saber cuánto y qué se está comprando, por local y por proveedor.",
+      "businessDecision": "Consolidar compras entre locales para negociar mejores precios (Lucía).",
+      "origin": "backend",
+      "allowlist": ["location_id", "country", "product_id", "product_category", "quantity", "unit", "currency", "supplier_name"],
+      "schema": {
+        "type": "object",
+        "required": ["location_id", "country", "product_id", "product_category", "quantity", "unit", "currency", "supplier_name"],
+        "properties": {
+          "location_id": { "$ref": "#/definitions/LocationID" },
+          "country": { "$ref": "#/definitions/CountryCode" },
+          "product_id": { "type": "integer", "description": "ID del ingrediente recibido" },
+          "product_category": { "$ref": "#/definitions/ProductCategory" },
+          "quantity": { "type": "number", "exclusiveMinimum": 0, "description": "Cantidad recibida" },
+          "unit": { "type": "string", "description": "Unidad de medida (kg, litro, unidad)" },
+          "currency": { "$ref": "#/definitions/CurrencyCode" },
+          "supplier_name": { "type": "string", "minLength": 1, "description": "Nombre del proveedor" }
+        }
+      }
+    },
+
+    "outbound_order_created": {
+      "title": "Orden de salida creada (consumo)",
+      "description": "Se dispara cuando un local registra consumo de ingredientes en la preparación de un plato (reason=consumption).",
+      "classification": "obligatorio",
+      "domain": "inventario",
+      "trigger": "Backend, al completar POST /inventory/orders/outbound con reason='consumption'.",
+      "businessHypothesis": "Necesitamos saber qué ingredientes se consumen más, y a qué ritmo, por local.",
+      "businessDecision": "Ajustar la sugerencia automática de pedidos a proveedores (Felipe).",
+      "origin": "backend",
+      "allowlist": ["location_id", "country", "product_id", "product_category", "quantity", "unit", "currency"],
+      "schema": {
+        "type": "object",
+        "required": ["location_id", "country", "product_id", "product_category", "quantity", "unit", "currency"],
+        "properties": {
+          "location_id": { "$ref": "#/definitions/LocationID" },
+          "country": { "$ref": "#/definitions/CountryCode" },
+          "product_id": { "type": "integer", "description": "ID del ingrediente consumido" },
+          "product_category": { "$ref": "#/definitions/ProductCategory" },
+          "quantity": { "type": "number", "exclusiveMinimum": 0, "description": "Cantidad consumida" },
+          "unit": { "type": "string", "description": "Unidad de medida" },
+          "currency": { "$ref": "#/definitions/CurrencyCode" }
+        }
+      }
+    },
+
+    "stock_waste_registered": {
+      "title": "Merma registrada",
+      "description": "Se dispara cuando un local registra merma (producto vencido, error de cocina, o pérdida/robo).",
+      "classification": "obligatorio",
+      "domain": "inventario",
+      "trigger": "Backend, al completar POST /inventory/orders/outbound con reason='waste'.",
+      "businessHypothesis": "Necesitamos saber cuánto producto se pierde, por qué razón, y en qué local.",
+      "businessDecision": "Priorizar auditorías de merma en los locales con peor indicador (Felipe).",
+      "origin": "backend",
+      "allowlist": ["location_id", "country", "product_id", "product_category", "quantity", "unit", "currency", "reason"],
+      "schema": {
+        "type": "object",
+        "required": ["location_id", "country", "product_id", "product_category", "quantity", "unit", "currency", "reason"],
+        "properties": {
+          "location_id": { "$ref": "#/definitions/LocationID" },
+          "country": { "$ref": "#/definitions/CountryCode" },
+          "product_id": { "type": "integer", "description": "ID del producto perdido" },
+          "product_category": { "$ref": "#/definitions/ProductCategory" },
+          "quantity": { "type": "number", "exclusiveMinimum": 0, "description": "Cantidad perdida" },
+          "unit": { "type": "string", "description": "Unidad de medida" },
+          "currency": { "$ref": "#/definitions/CurrencyCode" },
+          "reason": { "$ref": "#/definitions/WasteReason" }
+        }
+      }
+    },
+
+    "stock_threshold_triggered": {
+      "title": "Umbral mínimo de stock activado",
+      "description": "Se dispara cuando el stock de un producto cae por debajo del mínimo configurado para ese local.",
+      "classification": "obligatorio",
+      "domain": "inventario",
+      "trigger": "Backend, después de cualquier operación de salida, al verificar stock_resultante < threshold_min.",
+      "businessHypothesis": "Necesitamos saber con qué frecuencia un local se queda corto de un ingrediente clave.",
+      "businessDecision": "Ajustar el umbral mínimo o la frecuencia de reabastecimiento de ese producto.",
+      "origin": "backend",
+      "allowlist": ["location_id", "country", "product_id", "product_category", "current_stock", "threshold_min", "unit", "currency"],
+      "schema": {
+        "type": "object",
+        "required": ["location_id", "country", "product_id", "product_category", "current_stock", "threshold_min", "unit", "currency"],
+        "properties": {
+          "location_id": { "$ref": "#/definitions/LocationID" },
+          "country": { "$ref": "#/definitions/CountryCode" },
+          "product_id": { "type": "integer", "description": "Producto por debajo del umbral" },
+          "product_category": { "$ref": "#/definitions/ProductCategory" },
+          "current_stock": { "type": "number", "description": "Stock actual después de la operación" },
+          "threshold_min": { "type": "number", "description": "Umbral mínimo configurado para ese producto en ese local" },
+          "unit": { "type": "string", "description": "Unidad de medida" },
+          "currency": { "$ref": "#/definitions/CurrencyCode" }
+        }
+      }
+    },
+
+    "direct_stock_edit_rejected": {
+      "title": "Edición directa de stock rechazada",
+      "description": "Se dispara cuando un usuario intenta modificar el stock directamente (fuera de una orden) y el sistema lo rechaza.",
+      "classification": "obligatorio",
+      "domain": "inventario",
+      "trigger": "Middleware/backend ante intento de modificar stock fuera de orden de entrada/salida.",
+      "businessHypothesis": "Necesitamos saber si el personal está intentando saltarse el control de trazabilidad.",
+      "businessDecision": "Reforzar capacitación o permisos en los locales donde esto ocurre con más frecuencia (Jake).",
+      "origin": "backend",
+      "sensitiveData": "userId del envelope se almacena sin correlación a identidad real. No se duplica en properties.",
+      "allowlist": ["location_id", "country", "product_id", "attempt_type", "reason_rejected"],
+      "schema": {
+        "type": "object",
+        "required": ["location_id", "country", "product_id", "attempt_type", "reason_rejected"],
+        "properties": {
+          "location_id": { "$ref": "#/definitions/LocationID" },
+          "country": { "$ref": "#/definitions/CountryCode" },
+          "product_id": { "type": "integer", "description": "Producto que se intentó modificar" },
+          "attempt_type": { "$ref": "#/definitions/AttemptType" },
+          "reason_rejected": { "$ref": "#/definitions/RejectReason" }
+        }
+      }
+    },
+
+    "ingredient_price_variance_detected": {
+      "title": "Variación anómala de precio detectada",
+      "description": "Se dispara cuando el costo unitario de una orden de entrada varía más de un umbral (10%) respecto al histórico del mismo producto/proveedor.",
+      "classification": "obligatorio",
+      "domain": "inventario",
+      "trigger": "Backend, durante POST /inventory/orders/inbound, al detectar variación > umbral configurado.",
+      "businessHypothesis": "Necesitamos saber cuándo un ingrediente clave sube de precio de forma anómala.",
+      "businessDecision": "Alertar a Lucía y a Mariana para renegociar o buscar proveedor alterno.",
+      "origin": "backend",
+      "allowlist": ["location_id", "country", "product_id", "product_category", "supplier_name", "previous_unit_price", "new_unit_price", "variance_percentage", "currency"],
+      "schema": {
+        "type": "object",
+        "required": ["location_id", "country", "product_id", "product_category", "supplier_name", "previous_unit_price", "new_unit_price", "variance_percentage", "currency"],
+        "properties": {
+          "location_id": { "$ref": "#/definitions/LocationID" },
+          "country": { "$ref": "#/definitions/CountryCode" },
+          "product_id": { "type": "integer", "description": "Producto con variación de precio" },
+          "product_category": { "$ref": "#/definitions/ProductCategory" },
+          "supplier_name": { "type": "string", "description": "Proveedor asociado" },
+          "previous_unit_price": { "type": "number", "description": "Precio unitario histórico de referencia" },
+          "new_unit_price": { "type": "number", "description": "Precio unitario de la nueva orden" },
+          "variance_percentage": { "type": "number", "description": "Porcentaje de variación (ej. 15.5 = +15.5%)" },
+          "currency": { "$ref": "#/definitions/CurrencyCode" }
+        }
+      }
+    },
+
+    "auth_login_attempted": {
+      "title": "Intento de inicio de sesión",
+      "description": "Se dispara cada vez que se recibe una petición POST /auth/login.",
+      "classification": "oportunidad",
+      "domain": "autenticación",
+      "trigger": "Backend, cada petición POST /auth/login.",
+      "businessHypothesis": "Necesitamos saber cuántos intentos de login recibe el sistema y desde qué ubicaciones.",
+      "businessDecision": "Detectar picos anómalos, posibles ataques de fuerza bruta y evaluar refuerzo del sistema de autenticación (Jake).",
+      "origin": "backend",
+      "sensitiveData": "ip_country se deriva de la IP pero nunca se almacena la IP completa.",
+      "allowlist": ["success", "failure_reason", "ip_country"],
+      "schema": {
+        "type": "object",
+        "required": ["success"],
+        "properties": {
+          "success": { "type": "boolean", "description": "Indica si el login fue exitoso" },
+          "failure_reason": {
+            "type": "string",
+            "enum": ["invalid_credentials", "account_locked", "inactive_account"],
+            "description": "Solo si success=false"
+          },
+          "ip_country": {
+            "type": "string",
+            "description": "País inferido de la IP de origen (no la IP en sí). Dato anonimizado."
+          }
+        }
+      }
+    },
+
+    "auth_login_failed": {
+      "title": "Fallo de inicio de sesión",
+      "description": "Se dispara cuando verify_password retorna False en POST /auth/login.",
+      "classification": "oportunidad",
+      "domain": "autenticación",
+      "trigger": "Backend, verify_password retorna False.",
+      "businessHypothesis": "Necesitamos saber qué dominios de email están fallando y con qué frecuencia.",
+      "businessDecision": "Identificar cuentas bajo ataque o usuarios que necesitan restablecimiento de contraseña.",
+      "origin": "backend",
+      "sensitiveData": "Solo se almacena el dominio del email (ej. gmail.com), nunca el email completo.",
+      "allowlist": ["email_domain", "failure_count_window"],
+      "schema": {
+        "type": "object",
+        "required": ["email_domain", "failure_count_window"],
+        "properties": {
+          "email_domain": {
+            "type": "string",
+            "description": "Dominio del email (ej. gmail.com, brasaland.co). Sanitizado: solo dominio, no email completo."
+          },
+          "failure_count_window": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Número de fallos consecutivos desde el último éxito en los últimos 5 minutos"
+          }
+        }
+      }
+    },
+
+    "session_expired": {
+      "title": "Sesión expirada",
+      "description": "Se dispara cuando ProtectedRoute detecta que el token JWT ha expirado.",
+      "classification": "oportunidad",
+      "domain": "autenticación",
+      "trigger": "Frontend, error 401 en GET /auth/me o validación local de exp del JWT.",
+      "businessHypothesis": "Necesitamos saber con qué frecuencia los usuarios pierden la sesión.",
+      "businessDecision": "Ajustar ACCESS_TOKEN_EXPIRE_MINUTES para equilibrar seguridad y experiencia de usuario.",
+      "origin": "frontend",
+      "allowlist": ["time_since_last_activity", "page_before_expiry"],
+      "schema": {
+        "type": "object",
+        "required": ["time_since_last_activity"],
+        "properties": {
+          "time_since_last_activity": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Minutos desde la última interacción registrada"
+          },
+          "page_before_expiry": {
+            "type": "string",
+            "description": "Ruta de la página donde expiró la sesión (normalizada)"
+          }
+        }
+      }
+    },
+
+    "password_reset_requested": {
+      "title": "Restablecimiento de contraseña solicitado",
+      "description": "Se dispara al recibir POST /auth/forgot-password.",
+      "classification": "oportunidad",
+      "domain": "autenticación",
+      "trigger": "Backend, POST /auth/forgot-password.",
+      "businessHypothesis": "Necesitamos saber cuántos usuarios solicitan restablecimiento de contraseña.",
+      "businessDecision": "Identificar problemas de usabilidad en el login o campañas de phishing dirigidas al personal.",
+      "origin": "backend",
+      "sensitiveData": "Solo se almacena el dominio del email, nunca el email completo.",
+      "allowlist": ["email_domain"],
+      "schema": {
+        "type": "object",
+        "required": ["email_domain"],
+        "properties": {
+          "email_domain": {
+            "type": "string",
+            "description": "Dominio del email (ej. brasaland.co). Sanitizado: solo dominio."
+          }
+        }
+      }
+    },
+
+    "api_latency_recorded": {
+      "title": "Latencia de API registrada",
+      "description": "Se dispara después de cada petición HTTP. Medido desde el middleware de timing.",
+      "classification": "oportunidad",
+      "domain": "rendimiento",
+      "trigger": "Backend, middleware de timing (existente en main.py).",
+      "businessHypothesis": "Necesitamos saber qué endpoints son lentos y cómo evoluciona la latencia.",
+      "businessDecision": "Identificar degradaciones tempranas, endpoints que necesitan optimización o caching, y planificar escalabilidad.",
+      "origin": "backend",
+      "allowlist": ["method", "path", "status_code", "duration_ms", "country"],
+      "schema": {
+        "type": "object",
+        "required": ["method", "path", "status_code", "duration_ms"],
+        "properties": {
+          "method": { "$ref": "#/definitions/HTTPMethod" },
+          "path": {
+            "type": "string",
+            "description": "Ruta normalizada (ej. /inventory/products, /auth/login)"
+          },
+          "status_code": {
+            "type": "integer",
+            "description": "Código de respuesta HTTP"
+          },
+          "duration_ms": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Duración de la petición en milisegundos"
+          },
+          "country": {
+            "$ref": "#/definitions/CountryCode",
+            "description": "País inferido del local (opcional)"
+          }
+        }
+      }
+    },
+
+    "api_error_occurred": {
+      "title": "Error de API ocurrido",
+      "description": "Se dispara cada vez que un endpoint devuelve un código de error 4xx o 5xx.",
+      "classification": "oportunidad",
+      "domain": "rendimiento",
+      "trigger": "Backend, respuesta con status_code >= 400.",
+      "businessHypothesis": "Necesitamos saber qué errores están ocurriendo y con qué frecuencia.",
+      "businessDecision": "Detectar bugs, picos de tráfico mal manejados o problemas de integración con Supabase/TinyDB.",
+      "origin": "backend",
+      "allowlist": ["method", "path", "status_code", "error_type", "country"],
+      "schema": {
+        "type": "object",
+        "required": ["method", "path", "status_code", "error_type"],
+        "properties": {
+          "method": { "$ref": "#/definitions/HTTPMethod" },
+          "path": { "type": "string", "description": "Ruta normalizada" },
+          "status_code": { "type": "integer", "minimum": 400, "description": "Código de error HTTP (4xx o 5xx)" },
+          "error_type": { "$ref": "#/definitions/ErrorType" },
+          "country": { "$ref": "#/definitions/CountryCode", "description": "País inferido (opcional)" }
+        }
+      }
+    },
+
+    "frontend_error_occurred": {
+      "title": "Error de frontend no capturado",
+      "description": "Se dispara cuando se produce una excepción no capturada (window.onerror o React Error Boundary).",
+      "classification": "oportunidad",
+      "domain": "rendimiento",
+      "trigger": "Frontend, window.onerror o React Error Boundary.",
+      "businessHypothesis": "Necesitamos saber qué errores están experimentando los usuarios en el frontend.",
+      "businessDecision": "Corregir bugs antes de que se conviertan en reportes de incidencia y afecten la productividad del personal.",
+      "origin": "frontend",
+      "sensitiveData": "error_message se trunca a 200 caracteres y se filtran patrones que puedan contener datos del usuario.",
+      "allowlist": ["page_path", "error_type", "error_message"],
+      "schema": {
+        "type": "object",
+        "required": ["page_path", "error_type", "error_message"],
+        "properties": {
+          "page_path": { "type": "string", "description": "Ruta de la página donde ocurrió el error (normalizada)" },
+          "error_type": { "$ref": "#/definitions/FrontendErrorType" },
+          "error_message": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Mensaje de error sanitizado (máx. 200 caracteres, sin stack trace)"
+          }
+        }
+      }
+    },
+
+    "page_visited": {
+      "title": "Página visitada",
+      "description": "Se dispara cada vez que el usuario navega a una página del backoffice.",
+      "classification": "oportunidad",
+      "domain": "navegación",
+      "trigger": "Frontend, navegación a ruta del backoffice (layout o router).",
+      "businessHypothesis": "Necesitamos saber qué secciones del backoffice visitan más los operadores.",
+      "businessDecision": "Priorizar mejoras de UX y rendimiento en las rutas más usadas; detectar secciones infrautilizadas.",
+      "origin": "frontend",
+      "allowlist": ["page_path", "referrer_path", "country"],
+      "schema": {
+        "type": "object",
+        "required": ["page_path"],
+        "properties": {
+          "page_path": { "type": "string", "description": "Ruta normalizada de la página visitada (ej. /backoffice/inventory/products)" },
+          "referrer_path": { "type": "string", "description": "Ruta desde la que llegó el usuario (vacío si es entrada directa)" },
+          "country": { "$ref": "#/definitions/CountryCode", "description": "País inferido del local del usuario (opcional)" }
+        }
+      }
+    },
+
+    "section_abandoned": {
+      "title": "Sección abandonada",
+      "description": "Se dispara cuando el usuario abandona una sección sin interactuar con sus elementos principales.",
+      "classification": "oportunidad",
+      "domain": "navegación",
+      "trigger": "Frontend, abandono de página sin acciones de escritura posteriores.",
+      "businessHypothesis": "Necesitamos saber qué secciones consultan los operadores sin llegar a actuar.",
+      "businessDecision": "Identificar información insuficiente o confusa; mejorar ubicación del flujo de acción.",
+      "origin": "frontend",
+      "allowlist": ["page_path", "time_on_page_seconds", "has_scrolled"],
+      "schema": {
+        "type": "object",
+        "required": ["page_path", "time_on_page_seconds", "has_scrolled"],
+        "properties": {
+          "page_path": { "type": "string", "description": "Ruta de la sección abandonada" },
+          "time_on_page_seconds": { "type": "integer", "minimum": 0, "description": "Tiempo en segundos antes de abandonar" },
+          "has_scrolled": { "type": "boolean", "description": "Indica si el usuario hizo scroll en la página" }
+        }
+      }
+    },
+
+    "search_performed": {
+      "title": "Búsqueda realizada",
+      "description": "Se dispara cuando el usuario utiliza filtros de búsqueda en productos, órdenes, incidencias o proveedores.",
+      "classification": "oportunidad",
+      "domain": "navegación",
+      "trigger": "Frontend, uso de filtros de búsqueda.",
+      "businessHypothesis": "Necesitamos saber qué términos y filtros usan los operadores para buscar información.",
+      "businessDecision": "Mejorar la funcionalidad de búsqueda y detectar necesidades de información no cubiertas.",
+      "origin": "frontend",
+      "allowlist": ["section", "filter_type", "result_count"],
+      "schema": {
+        "type": "object",
+        "required": ["section", "filter_type", "result_count"],
+        "properties": {
+          "section": { "$ref": "#/definitions/SearchSection" },
+          "filter_type": { "$ref": "#/definitions/FilterType" },
+          "result_count": { "type": "integer", "minimum": 0, "description": "Número de resultados devueltos" }
+        }
+      }
+    },
+
+    "outbound_stock_warning_triggered": {
+      "title": "Advertencia de stock insuficiente",
+      "description": "Se dispara cuando el usuario ve la advertencia visual de stock insuficiente en el formulario de salida.",
+      "classification": "oportunidad",
+      "domain": "inventario",
+      "trigger": "Frontend, validación client-side: quantity > current_stock.",
+      "businessHypothesis": "Necesitamos saber con qué frecuencia los operadores intentan registrar salidas que superan el stock disponible.",
+      "businessDecision": "Identificar errores de conteo, productos mal etiquetados o necesidad de ajustar umbrales de reorden.",
+      "origin": "frontend",
+      "allowlist": ["product_id", "requested_quantity", "available_stock", "location_id"],
+      "schema": {
+        "type": "object",
+        "required": ["product_id", "requested_quantity", "available_stock", "location_id"],
+        "properties": {
+          "product_id": { "type": "integer", "description": "Producto con stock insuficiente" },
+          "requested_quantity": { "type": "number", "exclusiveMinimum": 0, "description": "Cantidad que el usuario intentó registrar" },
+          "available_stock": { "type": "number", "description": "Stock disponible al momento de la advertencia" },
+          "location_id": { "$ref": "#/definitions/LocationID" }
+        }
+      }
+    },
+
+    "incident_created": {
+      "title": "Incidencia creada",
+      "description": "Se dispara al registrarse una nueva incidencia en el gestor de incidencias.",
+      "classification": "oportunidad",
+      "domain": "incidencias",
+      "trigger": "Backend, al registrarse una nueva incidencia.",
+      "businessHypothesis": "Necesitamos saber qué tipo de incidencias se reportan más, en qué local y con qué origen.",
+      "businessDecision": "Priorizar la asignación de recursos de operaciones y detectar patrones tempranos de problemas (Felipe).",
+      "origin": "backend",
+      "allowlist": ["category", "origin", "branch", "country"],
+      "schema": {
+        "type": "object",
+        "required": ["category", "origin", "branch", "country"],
+        "properties": {
+          "category": { "$ref": "#/definitions/IncidentCategory" },
+          "origin": { "$ref": "#/definitions/IncidentOrigin" },
+          "branch": { "type": "string", "description": "Código del local o 'central'" },
+          "country": { "$ref": "#/definitions/CountryCode" }
+        }
+      }
+    },
+
+    "supplier_rate_updated": {
+      "title": "Tarifa de proveedor actualizada",
+      "description": "Se dispara al completar PATCH /suppliers/{id}/rate.",
+      "classification": "oportunidad",
+      "domain": "proveedores",
+      "trigger": "Backend, PATCH /suppliers/{id}/rate exitoso.",
+      "businessHypothesis": "Necesitamos saber con qué frecuencia y en qué magnitud cambian las tarifas de los proveedores.",
+      "businessDecision": "Alertar a Lucía sobre renegociaciones frecuentes que podrían indicar inestabilidad en el precio de materias primas clave.",
+      "origin": "backend",
+      "allowlist": ["supplier_id", "previous_rate", "new_rate", "variance_percentage", "currency", "country"],
+      "schema": {
+        "type": "object",
+        "required": ["supplier_id", "previous_rate", "new_rate", "variance_percentage", "currency", "country"],
+        "properties": {
+          "supplier_id": { "type": "integer", "description": "ID del proveedor" },
+          "previous_rate": { "type": "number", "description": "Tarifa anterior por unidad" },
+          "new_rate": { "type": "number", "description": "Nueva tarifa por unidad" },
+          "variance_percentage": { "type": "number", "description": "Porcentaje de cambio" },
+          "currency": { "$ref": "#/definitions/CurrencyCode" },
+          "country": { "$ref": "#/definitions/CountryCode" }
+        }
+      }
+    }
+  },
+
+  "summary": {
+    "totalEvents": 19,
+    "mandatoryEvents": 6,
+    "opportunityEvents": 13,
+    "domainsCovered": ["inventario", "autenticación", "rendimiento", "navegación", "incidencias", "proveedores"],
+    "classification": {
+      "obligatorio": ["inbound_order_created", "outbound_order_created", "stock_waste_registered", "stock_threshold_triggered", "direct_stock_edit_rejected", "ingredient_price_variance_detected"],
+      "oportunidad": ["auth_login_attempted", "auth_login_failed", "session_expired", "password_reset_requested", "api_latency_recorded", "api_error_occurred", "frontend_error_occurred", "page_visited", "section_abandoned", "search_performed", "outbound_stock_warning_triggered", "incident_created", "supplier_rate_updated"]
+    }
+  }
+}

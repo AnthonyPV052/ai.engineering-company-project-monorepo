@@ -1,0 +1,15 @@
+{
+  "total_registros": 100,
+  "registros_validos": 99,
+  "registros_invalidos": 1,
+  "incidencias_por_categoria": {
+    "queja": 50,
+    "fallo_operativo": 49
+  },
+  "incidencias_por_estado": {
+    "abierto": 34,
+    "cerrado": 51,
+    "descartado": 14
+  },
+  "tiempo_promedio_resolucion_horas": null
+}

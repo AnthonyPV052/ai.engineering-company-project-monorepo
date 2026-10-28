@@ -1,0 +1,50 @@
+[
+  {
+    "id": "loyalty-bronze-discount",
+    "question": "¿Qué descuento recibe el nivel Bronce de Brasa Points?",
+    "expected_source_document": "brasaland-loyalty-program.es.md",
+    "expected_chunk_text": "Bronce (0-19 puntos): 5% de descuento en bebidas los martes."
+  },
+  {
+    "id": "loyalty-redemption",
+    "question": "¿Desde cuántos puntos se pueden redimir y cuánto vale cada 5?",
+    "expected_source_document": "brasaland-loyalty-program.es.md",
+    "expected_chunk_text": "Los puntos se pueden redimir desde 15 puntos acumulados, en incrementos de 5."
+  },
+  {
+    "id": "supplier-schedule",
+    "question": "¿Cuándo debe el gerente generar el pedido semanal a proveedores?",
+    "expected_source_document": "brasaland-supplier-ordering.es.md",
+    "expected_chunk_text": "Cada gerente de local es responsable de generar el pedido semanal a proveedores los días lunes antes de las 10:00 a.m. (hora local)."
+  },
+  {
+    "id": "supplier-emergency",
+    "question": "¿Qué recargo tiene un pedido de emergencia y quién lo aprueba si supera 500 USD?",
+    "expected_source_document": "brasaland-supplier-ordering.es.md",
+    "expected_chunk_text": "se debe generar un pedido de emergencia, el cual tiene un recargo del 8% sobre el precio de lista."
+  },
+  {
+    "id": "waste-categories",
+    "question": "¿Cuáles son las tres categorías en las que se registra el desperdicio?",
+    "expected_source_document": "brasaland-waste-protocol.es.md",
+    "expected_chunk_text": "Todo local Brasaland debe registrar el desperdicio de producto en tres categorías: vencimiento, error de cocina, y merma no explicada"
+  },
+  {
+    "id": "waste-escalation",
+    "question": "¿Cuándo se debe escalar directamente a Felipe Guerrero?",
+    "expected_source_document": "brasaland-waste-protocol.es.md",
+    "expected_chunk_text": "Desperdicio de proteína cárnica premium (lomo, costilla) superior a 5 kg"
+  },
+  {
+    "id": "allergen-lomo",
+    "question": "¿Qué alérgeno contiene el Lomo a la Brasa?",
+    "expected_source_document": "brasaland-menu-allergens.es.md",
+    "expected_chunk_text": "Lomo a la Brasa: sin gluten, sin lácteos. Marinado contiene soya."
+  },
+  {
+    "id": "allergen-cross-contamination",
+    "question": "¿Se garantiza cero riesgo de contaminación cruzada ante una alergia?",
+    "expected_source_document": "brasaland-menu-allergens.es.md",
+    "expected_chunk_text": "Nunca se garantiza \"cero riesgo de contaminación cruzada\""
+  }
+]

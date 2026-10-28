@@ -1,0 +1,10 @@
+export const BRANCHES = [
+  ["central", "Central (Medellín / Miami)"], ["medellin_centro", "Medellín Centro"], ["medellin_laureles", "Medellín Laureles"], ["medellin_envigado", "Medellín Envigado"], ["medellin_bello", "Medellín Bello"], ["medellin_itagui", "Medellín Itagüí"], ["bogota_chapinero", "Bogotá Chapinero"], ["bogota_usaquen", "Bogotá Usaquén"], ["cali_granada", "Cali Granada"], ["barranquilla_norte", "Barranquilla Norte"], ["miami_doral", "Miami Doral"], ["miami_hialeah", "Miami Hialeah"], ["miami_kendall", "Miami Kendall"], ["orlando_international", "Orlando International Drive"], ["fort_lauderdale", "Fort Lauderdale"],
+] as const;
+export const CATEGORIES = [["equipment_failure", "Fallo de equipamiento de cocina o sala (horno, freidora, cámara frigorífica, TPV)"], ["supply_issue", "Problema con insumos: falta de producto, calidad deficiente, entrega incorrecta"], ["customer_complaint", "Queja o reclamación de cliente: producto, servicio, tiempo de espera, experiencia"], ["staff_issue", "Incidencia relacionada con personal: ausencia, conflicto, accidente laboral leve"], ["facility_issue", "Problema de instalaciones: agua, electricidad, climatización, limpieza"], ["pos_system", "Error en el sistema de caja o TPV"], ["delivery_issue", "Problema con pedidos a domicilio o plataformas de delivery"], ["other", "Cualquier incidencia que no encaje en las categorías anteriores"]] as const;
+export const STATUSES = [["open", "Abierta"], ["in_progress", "En gestión"], ["resolved", "Resuelta"], ["discarded", "Descartada"]] as const;
+export const ORIGINS = [["customer", "Cliente"], ["branch", "Sede"], ["internal", "Equipo interno"]] as const;
+export const statusLabels = Object.fromEntries(STATUSES) as Record<string, string>;
+export const categoryLabels = Object.fromEntries(CATEGORIES) as Record<string, string>;
+export const branchLabels = Object.fromEntries(BRANCHES) as Record<string, string>;
+export const originLabels = Object.fromEntries(ORIGINS) as Record<string, string>;

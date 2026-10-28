@@ -1,0 +1,63 @@
+{
+  "pipeline": "business_performance_pipeline",
+  "week_start": "2026-09-07",
+  "generated_at": "2026-09-03T18:39:36.039588+00:00",
+  "locations_count": 5,
+  "kpis": [
+    {
+      "location_id": "medellin-centro",
+      "country": "CO",
+      "week_start": "2026-09-07",
+      "total_purchase_cost": 2810000,
+      "total_waste_cost": 62000.0,
+      "waste_ratio": 0.0221,
+      "stockout_events_count": 1,
+      "price_alert_events_count": 1,
+      "currency": "COP"
+    },
+    {
+      "location_id": "medellin-envigado",
+      "country": "CO",
+      "week_start": "2026-09-07",
+      "total_purchase_cost": 1750000,
+      "total_waste_cost": 0.0,
+      "waste_ratio": 0.0,
+      "stockout_events_count": 1,
+      "price_alert_events_count": 0,
+      "currency": "COP"
+    },
+    {
+      "location_id": "medellin-poblado",
+      "country": "CO",
+      "week_start": "2026-09-07",
+      "total_purchase_cost": 3095000,
+      "total_waste_cost": 38000.0,
+      "waste_ratio": 0.0123,
+      "stockout_events_count": 1,
+      "price_alert_events_count": 1,
+      "currency": "COP"
+    },
+    {
+      "location_id": "miami-brickell",
+      "country": "US",
+      "week_start": "2026-09-07",
+      "total_purchase_cost": 24200,
+      "total_waste_cost": 420.0,
+      "waste_ratio": 0.0174,
+      "stockout_events_count": 0,
+      "price_alert_events_count": 1,
+      "currency": "USD"
+    },
+    {
+      "location_id": "miami-southbeach",
+      "country": "US",
+      "week_start": "2026-09-07",
+      "total_purchase_cost": 18000,
+      "total_waste_cost": 0.0,
+      "waste_ratio": 0.0,
+      "stockout_events_count": 1,
+      "price_alert_events_count": 0,
+      "currency": "USD"
+    }
+  ]
+}

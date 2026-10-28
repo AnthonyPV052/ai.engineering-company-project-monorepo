@@ -1,0 +1,130 @@
+{
+  "contexto": {
+    "required_fields": [
+      "incidente_id",
+      "cliente_id",
+      "categoria",
+      "estado",
+      "fecha_creacion"
+    ],
+    "allowed_categories": [
+      "fallo_operativo",
+      "queja",
+      "solicitud"
+    ],
+    "allowed_states": [
+      "abierto",
+      "cerrado",
+      "en_proceso",
+      "resuelto"
+    ]
+  },
+  "resumen": {
+    "total_registros": 100,
+    "registros_validos": 88,
+    "registros_invalidos": 12,
+    "porcentaje_invalidos": 12.0,
+    "incidencias_por_categoria": {
+      "queja": 30,
+      "solicitud": 28,
+      "fallo_operativo": 30
+    },
+    "incidencias_por_estado": {
+      "abierto": 20,
+      "en_proceso": 22,
+      "resuelto": 24,
+      "cerrado": 22
+    },
+    "tiempo_promedio_resolucion_horas": 19.18
+  },
+  "invalidos": [
+    {
+      "linea_csv": 90,
+      "incidente_id": "INC-0089",
+      "errores": [
+        "categoria_no_permitida"
+      ]
+    },
+    {
+      "linea_csv": 91,
+      "incidente_id": "INC-0090",
+      "errores": [
+        "estado_no_permitido"
+      ]
+    },
+    {
+      "linea_csv": 92,
+      "incidente_id": "",
+      "errores": [
+        "campo_obligatorio_faltante:incidente_id"
+      ]
+    },
+    {
+      "linea_csv": 93,
+      "incidente_id": "INC-0092",
+      "errores": [
+        "campo_obligatorio_faltante:cliente_id"
+      ]
+    },
+    {
+      "linea_csv": 94,
+      "incidente_id": "INC-0093",
+      "errores": [
+        "campo_obligatorio_faltante:estado"
+      ]
+    },
+    {
+      "linea_csv": 95,
+      "incidente_id": "INC-0094",
+      "errores": [
+        "campo_obligatorio_faltante:categoria"
+      ]
+    },
+    {
+      "linea_csv": 96,
+      "incidente_id": "INC-0095",
+      "errores": [
+        "categoria_no_permitida"
+      ]
+    },
+    {
+      "linea_csv": 97,
+      "incidente_id": "INC-0096",
+      "errores": [
+        "estado_no_permitido"
+      ]
+    },
+    {
+      "linea_csv": 98,
+      "incidente_id": "INC-0097",
+      "errores": [
+        "campo_obligatorio_faltante:fecha_creacion"
+      ]
+    },
+    {
+      "linea_csv": 99,
+      "incidente_id": "INC-0098",
+      "errores": [
+        "tiempo_resolucion_no_numerico"
+      ]
+    },
+    {
+      "linea_csv": 100,
+      "incidente_id": "INC-0099",
+      "errores": [
+        "tiempo_resolucion_negativo"
+      ]
+    },
+    {
+      "linea_csv": 101,
+      "incidente_id": "INC-0100",
+      "errores": [
+        "fecha_creacion_invalida"
+      ]
+    }
+  ],
+  "validacion_esperada": {
+    "coincide": true,
+    "diferencias": []
+  }
+}

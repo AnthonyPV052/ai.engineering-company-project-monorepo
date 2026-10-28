@@ -1,0 +1,41 @@
+{
+  "pipeline": "business_performance_pipeline",
+  "week_start": "2026-08-31",
+  "generated_at": "2026-09-03T18:54:45.811557+00:00",
+  "locations_count": 3,
+  "kpis": [
+    {
+      "location_id": "medellin-centro",
+      "country": "CO",
+      "week_start": "2026-08-31",
+      "total_purchase_cost": 3359000,
+      "total_waste_cost": 85000,
+      "waste_ratio": 0.0253,
+      "stockout_events_count": 2,
+      "price_alert_events_count": 0,
+      "currency": "COP"
+    },
+    {
+      "location_id": "medellin-poblado",
+      "country": "CO",
+      "week_start": "2026-08-31",
+      "total_purchase_cost": 3500000,
+      "total_waste_cost": 42000,
+      "waste_ratio": 0.012,
+      "stockout_events_count": 1,
+      "price_alert_events_count": 1,
+      "currency": "COP"
+    },
+    {
+      "location_id": "miami-brickell",
+      "country": "US",
+      "week_start": "2026-08-31",
+      "total_purchase_cost": 21000,
+      "total_waste_cost": 350,
+      "waste_ratio": 0.0167,
+      "stockout_events_count": 1,
+      "price_alert_events_count": 1,
+      "currency": "USD"
+    }
+  ]
+}

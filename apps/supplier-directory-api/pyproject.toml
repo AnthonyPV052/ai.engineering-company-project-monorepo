@@ -1,0 +1,25 @@
+[project]
+name = "supplier-directory-api"
+version = "0.1.0"
+description = "FastAPI + TinyDB Supplier Directory for Brasaland"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.111.0",
+  "uvicorn>=0.30.0",
+  "tinydb>=4.8.0",
+  "pydantic[email]>=2.8.0"
+]
+
+[project.scripts]
+seed = "seed:main"
+
+[build-system]
+requires = ["hatchling>=1.25.0"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+package = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+include = ["seed.py"]

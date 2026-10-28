@@ -1,0 +1,59 @@
+[project]
+name = "services-api"
+version = "0.1.0"
+description = "Brasaland Supplier Directory API"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.111.0",
+  "uvicorn>=0.30.0",
+  "tinydb>=4.8.0",
+  "pydantic[email]>=2.8.0",
+  "python-jose[cryptography]>=3.5.0",
+  "passlib[bcrypt]>=1.7.4",
+  "bcrypt==4.0.1",
+  "sqlmodel>=0.0.39",
+  "psycopg2-binary>=2.9.12",
+  "httpx>=0.27.0",
+  "pandas>=2.0.0",
+  "sqlalchemy>=2.0.0",
+  "prefect>=3.0.0",
+  "celery[redis]>=5.4.0",
+  "flower>=2.0,<3",
+  "qdrant-client>=1.19.1",
+  "fastembed>=0.8.0",
+  "openai>=3.16.2",
+  "langgraph>=1.2.12",
+  "langchain-mcp-adapters>=0.1.0",
+]
+
+[project.scripts]
+seed = "seed:main"
+seed-inventory = "seed_inventory:main"
+
+[build-system]
+requires = ["hatchling>=1.25.0"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+package = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+include = [
+  "seed.py",
+  "main.py",
+  "models.py",
+  "database.py",
+  "security.py",
+  "email_service.py",
+  "auth_models.py",
+  "users_service.py",
+  "routes/*.py",
+  "telemetry_util.py",
+  "telemetry/*.py",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
