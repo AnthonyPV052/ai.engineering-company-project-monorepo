@@ -1,8 +1,10 @@
-"""HTTP routes for RFP intake (Parte 1).
+"""HTTP routes for RFP intake (Parte 1 + Part 2).
 
-POST /api/rfp/upload    — Upload PDF, create ticket, trigger background pipeline
-GET  /api/rfp/tickets   — List all tickets
-GET  /api/rfp/tickets/{ticket_id} — Get ticket detail + metadata + department sections
+POST /api/rfp/upload                        — Upload PDF, create ticket, trigger background pipeline
+GET  /api/rfp/tickets                       — List all tickets
+GET  /api/rfp/tickets/{ticket_id}           — Get ticket detail + metadata + department sections
+POST /api/rfp/tickets/{ticket_id}/generate  — Trigger Part 2 (generation + evaluation) from Part 1 handoff
+GET  /api/rfp/tickets/{ticket_id}/part2     — Get Part 2 results (drafts + evaluations)
 
 Follows the existing pattern from routes/inventory.py.
 """
@@ -15,7 +17,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Request, status
 from sqlmodel import Session, select
@@ -28,6 +30,9 @@ from rfp_models import (
     RFPTicket,
     TICKET_STATUS_ANALISIS_COMPLETO,
     TICKET_STATUS_ANALIZANDO,
+    TICKET_STATUS_GENERANDO_BORRADOR,
+    TICKET_STATUS_EN_EVALUACION,
+    TICKET_STATUS_NEEDS_HUMAN_REVIEW,
     TICKET_STATUS_DESCARTADO,
 )
 from security import get_current_user
@@ -350,4 +355,171 @@ def get_ticket_synthesis(
         "ticket_id": ticket_id,
         "status": ticket.status,
         "synthesis": payload,
+    }
+
+
+# ---------------------------------------------------------------------------
+# POST /api/rfp/tickets/{ticket_id}/generate — Trigger Part 2 pipeline
+# ---------------------------------------------------------------------------
+
+
+@router.post("/tickets/{ticket_id}/generate", status_code=status.HTTP_202_ACCEPTED)
+async def generate_response(
+    ticket_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Trigger Part 2 response generation for a completed Part 1 ticket."""
+    ticket = db.get(RFPTicket, ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket no encontrado")
+
+    if ticket.status != TICKET_STATUS_ANALISIS_COMPLETO:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Ticket en estado '{ticket.status}'. Se requiere 'analisis_completo'.",
+        )
+
+    if not ticket.handoff_payload:
+        raise HTTPException(
+            status_code=400,
+            detail="Ticket no tiene payload de handoff (Parte 1 incompleta).",
+        )
+
+    # Dispatch via Celery or run inline
+    task_id = _trigger_part2(ticket_id)
+
+    return {
+        "ticket_id": ticket_id,
+        "status": "generando_borrador",
+        "task_id": task_id,
+        "message": "Generación de borradores iniciada.",
+    }
+
+
+def _trigger_part2(ticket_id: str) -> Optional[str]:
+    """Trigger Part 2 pipeline via Celery, or run inline."""
+    try:
+        from celery_app import celery_app
+        from rfp_tasks import run_rfp_response_generation
+
+        task = run_rfp_response_generation.delay(ticket_id=ticket_id)
+        logger.info("Part 2 dispatched via Celery: ticket=%s task=%s", ticket_id, task.id)
+        return task.id
+    except Exception as exc:
+        logger.warning("Celery not available, running Part 2 inline: %s", exc)
+        _run_part2_inline(ticket_id)
+        return None
+
+
+def _run_part2_inline(ticket_id: str) -> None:
+    """Run Part 2 pipeline synchronously (fallback when no Celery)."""
+    try:
+        import sys
+        from pathlib import Path
+
+        repo_root = Path(__file__).resolve().parents[1]
+        if str(repo_root) not in sys.path:
+            sys.path.insert(0, str(repo_root))
+
+        from data.pipelines.rfp_intake.graph_part2 import trigger_part2
+
+        logger.info("Running Part 2 inline for ticket %s", ticket_id)
+        result = trigger_part2(ticket_id)
+        logger.info("Inline Part 2 completed for ticket %s: status=%s", ticket_id, result.get("status"))
+    except Exception as exc:
+        logger.error("Inline Part 2 failed for ticket %s: %s", ticket_id, exc)
+        try:
+            from sqlmodel import Session
+            from database import _get_engine
+            from rfp_models import RFPEventLog, RFPTicket
+
+            engine = _get_engine()
+            with Session(engine) as session:
+                ticket = session.get(RFPTicket, ticket_id)
+                if ticket:
+                    ticket.status = TICKET_STATUS_NEEDS_HUMAN_REVIEW
+                    ticket.updated_at = datetime.now(timezone.utc)
+                    session.add(ticket)
+                    event = RFPEventLog(
+                        ticket_id=ticket_id,
+                        event="part2_error",
+                        detail=f"Part 2 failed: {exc}",
+                    )
+                    session.add(event)
+                    session.commit()
+        except Exception:
+            logger.exception("Failed to mark ticket error")
+
+
+# ---------------------------------------------------------------------------
+# GET /api/rfp/tickets/{ticket_id}/part2 — Get Part 2 results
+# ---------------------------------------------------------------------------
+
+
+@router.get("/tickets/{ticket_id}/part2")
+def get_part2_results(
+    ticket_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Get Part 2 results (drafts + evaluations) for a ticket."""
+    ticket = db.get(RFPTicket, ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket no encontrado")
+
+    p2_statuses = {
+        TICKET_STATUS_GENERANDO_BORRADOR,
+        TICKET_STATUS_EN_EVALUACION,
+        TICKET_STATUS_NEEDS_HUMAN_REVIEW,
+    }
+
+    # Also show if the handoff payload contains Part 2 results
+    is_part2 = ticket.status in p2_statuses
+    has_part2_payload = False
+    part2_payload = None
+    if ticket.handoff_payload and ticket.status != TICKET_STATUS_ANALISIS_COMPLETO:
+        try:
+            payload = json.loads(ticket.handoff_payload)
+            if payload.get("sections"):
+                has_part2_payload = True
+                part2_payload = payload
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    if not is_part2 and not has_part2_payload:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Parte 2 no iniciada para ticket '{ticket.status}'. "
+                   f"Use POST /api/rfp/tickets/{ticket_id}/generate para comenzar.",
+        )
+
+    # Get department sections with Part 2 data
+    sections = db.exec(
+        select(DepartmentSection).where(DepartmentSection.ticket_id == ticket_id)
+    ).all()
+
+    section_list = []
+    for s in sections:
+        eval_results = None
+        if s.evaluation_results:
+            try:
+                eval_results = json.loads(s.evaluation_results)
+            except json.JSONDecodeError:
+                eval_results = {"raw": s.evaluation_results}
+
+        section_list.append({
+            "id": s.id,
+            "department_id": s.department_id,
+            "draft_content": s.draft_content,
+            "evaluation_results": eval_results,
+            "approval_status": s.approval_status,
+            "key_aspects": s.key_aspects,
+        })
+
+    return {
+        "ticket_id": ticket_id,
+        "status": ticket.status,
+        "part2_payload": part2_payload,
+        "department_sections": section_list,
     }

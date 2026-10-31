@@ -98,5 +98,50 @@ def _mark_ticket_failed(ticket_id: str, error: str) -> None:
         logger.error("Failed to mark ticket %s as failed: %s", ticket_id, persist_exc)
 
 
+# ---------------------------------------------------------------------------
+# Part 2 — RFP response generation pipeline
+# ---------------------------------------------------------------------------
+
+
+@celery_app.task(bind=True, max_retries=2, acks_late=True, name="tasks.run_rfp_response_generation")
+def run_rfp_response_generation(self: Any, ticket_id: str) -> dict[str, Any]:
+    """Execute the Part 2 response generation pipeline from Part 1 handoff."""
+    _ensure_sys_path()
+
+    started = time.perf_counter()
+    attempt = self.request.retries + 1
+
+    try:
+        from data.pipelines.rfp_intake.graph_part2 import trigger_part2
+
+        logger.info("task=%s ticket=%s attempt=%s starting Part 2",
+                     self.request.id, ticket_id, attempt)
+
+        result = trigger_part2(ticket_id)
+
+        duration = time.perf_counter() - started
+        logger.info("task=%s ticket=%s attempt=%s Part 2 status=%s duration=%.3fs",
+                     self.request.id, ticket_id, attempt,
+                     result.get("status", "unknown"), duration)
+        return {
+            "ticket_id": ticket_id,
+            "status": result.get("status"),
+            "duration_seconds": round(duration, 2),
+        }
+
+    except Exception as exc:
+        duration = time.perf_counter() - started
+        if self.request.retries < self.max_retries:
+            countdown = 2 ** self.request.retries
+            logger.warning("task=%s ticket=%s attempt=%s Part 2 retrying after %.3fs: %s",
+                           self.request.id, ticket_id, attempt, duration, exc)
+            raise self.retry(exc=exc, countdown=countdown)
+
+        logger.error("task=%s ticket=%s attempt=%s Part 2 failed after %.3fs: %s",
+                      self.request.id, ticket_id, attempt, duration, exc)
+        _mark_ticket_failed(ticket_id, str(exc))
+        raise
+
+
 # Import celery_app at the bottom to avoid circular imports
 from celery_app import celery_app  # noqa: E402, F811
