@@ -1,109 +1,66 @@
-# Pendientes — Sistema de Memoria del Agente
+# Sistema de Memoria del Agente — Estado de verificación
 
-> **Contexto:** Este proyecto se desarrolló en un Codespaces con 32 GB de almacenamiento que resultó insuficiente para el código fuente, imágenes Docker (backend ~918 MB cada una) y datos de Supabase. Los pasos 1-5 de la migración están completos, pero el almacenamiento se agotó antes de poder verificar el flujo completo end-to-end.
+> **Actualizado:** 2026-10-28. Se completó la verificación end-to-end del flujo de memoria en el entorno Codespaces. Los servicios backend, Redis y Qdrant quedaron activos al terminar.
 
-## ✅ Completado
+## ✅ Infraestructura y esquema
 
-### Infraestructura
-- [x] Contenedores funcionales: backend, worker, redis, qdrant, flower
-- [x] Conexión a Supabase PostgreSQL vía pooler IPv4
-- [x] pgvector v0.8.2 instalado y funcional
+- PostgreSQL/Supabase operativo, con pgvector 0.8.2; tablas `agent_memories`, `memory_proposals` y `memory_audit_log` presentes.
+- `agent_memories.embedding` y el código de persistencia/búsqueda usan `vector(1024)`, consistente con `pplx-embed-v1-0.6b`.
+- La unicidad parcial permite propuestas pendientes en sesiones diferentes.
+- Qdrant `v1.15.5` contiene la colección `brasaland_knowledge` indexada con 18 chunks. La búsqueda funciona; el cliente `qdrant-client 1.19.1` muestra advertencia de diferencia de versiones, sin bloquear las pruebas.
 
-### Migración 003 — Agent Memory Store
-- [x] SQL actualizado a `vector(1024)` (el embedding `pplx-embed-v1-0.6b` genera 1024 dimensiones)
-- [x] Tablas creadas: `agent_memories`, `memory_proposals`, `memory_audit_log`
-- [x] Índices: IVFFlat (cosine, 200 lists), unicidad parcial por sesión, timestamps, etc.
+## ✅ Flujos end-to-end verificados
 
-### Código
-- [x] `database.py`: `init_db()` con `exclude_tables` para no pisar esquemas de migración
-- [x] `main.py`: lifespan captura `OperationalError`, importa `memory.models` antes de init_db, registra `memory_router`
-- [x] `graph/state.py`: `session_id`, `base_language`, `memory_proposal` en `AgentState`
-- [x] `graph/routing.py`: redirige a `generate` si hay `pending_proposal_was_present`
-- [x] `graph/tracing.py`: `memory_proposal` y `session_id` opcionales en `finish_trace()`
-- [x] `graph/nodes.py`: `generate_node` usa `generate_answer_with_memory`, busca memorias previas, crea propuestas
-- [x] `routes/knowledge.py`: pre-procesa intención del usuario frente a propuesta pendiente (classifier), resuelve propuestas
-- [x] `memory/generation.py`: `field_validator` coerce `confidence` de string ("alta") a float (0.9)
-- [x] `memory/store.py`: CRUD completo con validaciones, embedding 1024, categorías permitidas, patrones prohibidos
+| Caso | Resultado |
+|---|---|
+| Pregunta de conocimiento documentado sobre merma | Respuesta RAG correcta, sin propuesta de memoria. |
+| Preferencia operativa recurrente | Se generó propuesta para preferencia del gerente de Medellín: reportes por WhatsApp. |
+| Aprobación explícita | Propuesta aprobada y memoria persistida en `agent_memories` con embedding 1024D. |
+| Búsqueda directa | La búsqueda exacta recupera la memoria (score 1.0). |
+| Rechazo | Propuesta `e6d821c2-5dc4-49cb-9673-0cb5b51d792c` está `rejected`, `approved_memory_id` es NULL; auditoría incluye `classification_ambiguous`, `classification_rejected` y `rejected`. No hay memoria persistida de esa propuesta. |
+| Cambio de tema | Propuesta pendiente se marca `discarded` y se registra en auditoría. |
+| Sesiones distintas | `e2e-concurrent-a` y `e2e-concurrent-b` mantienen propuestas `pending` diferentes; se registró `proposal_created` para ambas. |
+| Consulta explícita de recuerdo sin contexto RAG | Tras la corrección de routing/umbral, el endpoint devuelve: “Sí, según la memoria confirmada, el gerente de Medellín prefiere recibir los reportes por WhatsApp.” |
 
-## ❌ Pendiente — Verificación End-to-End
+### Búsqueda semántica y umbral
 
-El flujo completo de memoria no pudo probarse porque:
-1. El archivo `services/api/memory/generation.py` se corrompió (0 bytes) tras hot-reload justo cuando se agotó el disco
-2. Aunque se corrigió el SQL a `vector(1024)`, `store.py` también se corrompió y no se pudo restaurar por falta de espacio
-3. Los archivos nuevos en `services/api/memory/` y `services/api/tests/` nunca se escribieron completamente
+- El umbral normal se mantiene en `0.85`; una paráfrasis general obtuvo score `0.7666` y no supera el umbral. No se relajó la política global.
+- Para preguntas identificadas explícitamente como recuerdo (`recuerdas`/`remember` y patrones de preferencia), `generate_node` usa umbral local `0.60`; el resto conserva `0.85`. La pregunta amplia “¿Recuerdas algo sobre el gerente de Medellín?” puntuó `0.6273` frente a la memoria confirmada, por debajo del anterior `0.70`; así se explica el fallo concreto. Las respuestas siguen distinguiendo memorias confirmadas de fuentes/políticas corporativas.
+- No reducir globalmente el umbral sin una evaluación más amplia de precisión/recall.
 
-### Pasos para retomar en un Codespaces con más almacenamiento (>64 GB recomendado)
+## ✅ Cambios en código
 
-```bash
-# 1. Verificar que los archivos de memoria existen y no están corruptos
-ls -la services/api/memory/
-cat services/api/memory/generation.py  # Debe tener >100 líneas
-cat services/api/memory/store.py       # Debe tener >250 líneas
-cat services/api/memory/classifier.py
-cat services/api/memory/routes/__init__.py
-cat services/api/memory/models.py
+- `services/api/graph/routing.py`: clasifica preguntas explícitas de recuerdo y enruta a `generate` aunque la recuperación RAG esté vacía.
+- `services/api/graph/nodes.py`: busca memorias para ese camino, usa `threshold=0.60` solo en recuerdo explícito y evita llamar al generador si no hay contexto ni memorias coincidentes. Las preguntas sin recuerdo conservan el fallback `no_context`.
+- `services/api/graph/routing.py` y `nodes.py`: los imperativos explícitos “Recuerda esto/que...” también pasan a generación sin contexto RAG. El prompt aclara que cambios duraderos de disponibilidad de menú por local pueden proponerse y que requieren aprobación explícita antes de persistirse.
+- `tests/pipelines/test_agent_routing.py`: cubre routing de recuerdo, fallback sin resultados, paso de memorias aprobadas al generador y mantiene la evaluación existente de fallos mixtos.
+- Se corrigió un test de fallback mixto que parcheaba la función generadora obsoleta.
 
-# 2. Verificar tablas en Supabase
-docker compose exec backend uv run python3 -c "
-from database import _get_engine
-from sqlmodel import Session, text
-with Session(_get_engine()) as session:
-    rows = session.execute(text(\"\"\"
-        SELECT table_name FROM information_schema.tables
-        WHERE table_schema = 'public'
-        AND table_name IN ('agent_memories','memory_proposals','memory_audit_log')
-    \"\"\")).fetchall()
-    for r in rows: print(f'  ✓ {r[0]}')
-"
+## ✅ Tests ejecutados
 
-# 3. Reconstruir imágenes y levantar contenedores
-docker compose build --no-cache backend worker
-docker compose up -d
+Ejecutados en el contenedor backend (Python 3.12):
 
-# 4. Probar respuesta del agente (debe responder correctamente desde RAG)
-curl -s -X POST http://localhost:8020/knowledge/query \
-  -H "Content-Type: application/json" \
-  -d '{"question":"¿Cómo se maneja la merma no explicada?","session_id":"e2e-001"}'
-
-# 5. Pregunta que debería generar propuesta de memoria
-curl -s -X POST http://localhost:8020/knowledge/query \
-  -H "Content-Type: application/json" \
-  -d '{"question":"El gerente de Medellín prefiere que le reporten las incidencias por WhatsApp en lugar del sistema","session_id":"e2e-002"}'
-
-# 6. Ver propuesta pendiente
-curl -s -X POST http://localhost:8020/memory/proposal/pending \
-  -H "Content-Type: application/json" \
-  -d '{"session_id":"e2e-002"}'
-
-# 7. Aprobar la propuesta
-curl -s -X POST http://localhost:8020/memory/proposal/resolve \
-  -H "Content-Type: application/json" \
-  -d '{"session_id":"e2e-002","proposal_id":"<ID_DEL_PASO_6>","resolution":"approved"}'
-
-# 8. Buscar memoria por similitud semántica
-curl -s -X POST http://localhost:8020/memory/search \
-  -H "Content-Type: application/json" \
-  -d '{"query":"WhatsApp gerente Medellín reportar incidencias"}'
-
-# 9. Ver auditoría
-curl -s http://localhost:8020/memory/audit?limit=10
+```text
+34 passed in 7.88s
 ```
 
-### Casos de prueba que cubrir
+Incluye:
+- `tests/pipelines/test_agent_routing.py` — 17 tests
+- `tests/pipelines/test_rag.py` — 5 tests
+- `services/api/tests/test_memory_policy.py` — 12 tests
 
-| # | Escenario | Paso crítico |
-|---|-----------|--------------|
-| 1 | Pregunta RAG normal → answer OK, memory_proposal=null | Verificar que el LLM evalúa correctamente: conocimiento documentado no merece memoria episódica |
-| 2 | Hecho operativo (ej: "El gerente de Miami prefiere email") → should_store=true | Verificar que el LLM clasifica como dato episódico relevante |
-| 3 | Usuario responde "sí" → propuesta se aprueba → se persiste en agent_memories | Verificar el flujo classifier → resolve_proposal → store_memory |
-| 4 | Usuario responde "no" → propuesta se rechaza → audit trail | Verificar que no queda en agent_memories |
-| 5 | Usuario cambia de tema → propuesta se descarta automáticamente | Verificar classify_intention devuelve topic_change |
-| 6 | Búsqueda semántica de memoria persistida | Verificar que search_memories devuelve resultados con score > 0.85 |
-| 7 | Dos sesiones simultáneas con propuestas pendientes | Verificar que el índice parcial único no bloquea |
-| 8 | Familiar: consultar "¿recuerdas algo sobre..." con memoria guardada | Verificar que aparece en memoria_context del generate_node |
+La suite completa del repositorio no se ejecutó; estos son los tests de routing, RAG y política de memoria relacionados con los cambios.
 
-### Problemas conocidos
+## ⚠️ Observaciones operativas
 
-1. **Dimensión del embedding:** `pplx-embed-v1-0.6b` → 1024D. Si se cambia el modelo de embedding, hay que actualizar `vector(1024)` en BD y las validaciones en `store.py`.
-2. **LLM devuelve confidence como string:** El modelo deepseek-v4-flash a veces devuelve "alta" en lugar de 0.9. El `field_validator` en `MemorySuggest` mapea strings, pero si el LLM devuelve un valor no mapeado, se asigna 0.0 por defecto.
-3. **Hot-reaload + Docker volumes:** Los volúmenes montan `./services/api:/app`. Cuando uvicorn recarga en caliente y el disco se llena, los archivos pueden quedar truncados (0 bytes). **Solución:** usar `--reload-dir` más específico o desactivar reload en producción.
+- El gateway de embeddings aplica rate limit de 15 solicitudes/minuto. La indexación RAG de 18 chunks se completó aplicando espera entre requests.
+- El entorno local no tiene `pytest`; los tests se ejecutaron dentro de `brasaland-backend`.
+- `docker compose` monta `services/api` en `/app` y el backend usa `uvicorn --reload`; tener presente el riesgo de recarga si se alteran archivos mientras hay falta de disco.
+- Redis y worker/Flower no estaban activos al cierre de esta ejecución; backend, Redis y Qdrant sí estaban activos según el último estado comprobado. El flujo de memoria validado no depende del worker.
+
+## Pendientes residuales
+
+- Ampliar evaluación de la detección de intención de recuerdo en idiomas y formulaciones adicionales.
+- Medir precisión/recall del umbral local `0.60` con más memorias y paráfrasis antes de generalizarlo.
+- Ejecutar suite completa de tests en un entorno con dependencias instaladas.
+- Opcional: detener los contenedores de backend, Redis y Qdrant al terminar el trabajo.
