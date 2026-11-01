@@ -17,6 +17,7 @@ from routes.knowledge import router as knowledge_router
 from routes.profiles import router as profiles_router
 from routes.suppliers import router as suppliers_router
 from routes.users import router as users_router
+from routes.rfp import router as rfp_router
 from telemetry.router import router as telemetry_router
 from telemetry.report import router as report_router
 
@@ -152,6 +153,7 @@ app.include_router(profiles_router)
 app.include_router(incidents_router)
 app.include_router(inventory_router)
 app.include_router(knowledge_router)
+app.include_router(rfp_router)
 app.include_router(telemetry_router)
 app.include_router(report_router)
 app.include_router(reporting_router)

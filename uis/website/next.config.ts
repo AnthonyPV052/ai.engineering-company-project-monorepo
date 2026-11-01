@@ -29,6 +29,10 @@ const nextConfig: NextConfig = {
         destination: `${API_UPSTREAM}/api/incidents/:path*`,
       },
       {
+        source: "/api/rfp/:path*",
+        destination: `${API_UPSTREAM}/api/rfp/:path*`,
+      },
+      {
         source: "/api/:path*",
         destination: `${API_UPSTREAM}/:path*`,
       },

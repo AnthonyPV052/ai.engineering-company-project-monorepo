@@ -11,6 +11,11 @@ const navigationItems = [
     icon: <><path d="M12 8v4l2.5 1.5" /><circle cx="12" cy="12" r="9" /></>,
   },
   {
+    label: "Recepción de RFPs",
+    href: "/backoffice/rfp",
+    icon: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="12" y1="18" x2="12" y2="12" /><line x1="9" y1="15" x2="15" y2="15" /></>,
+  },
+  {
     label: "Directorio de proveedores",
     href: "/backoffice/suppliers",
     icon: <><path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6M9 9h.01M15 9h.01M9 12h.01M15 12h.01" /></>,
