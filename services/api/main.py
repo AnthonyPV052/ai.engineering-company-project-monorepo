@@ -17,6 +17,8 @@ from routes.knowledge import router as knowledge_router
 from routes.profiles import router as profiles_router
 from routes.suppliers import router as suppliers_router
 from routes.users import router as users_router
+from routes.rfp import router as rfp_router
+from chat.ws import router as chat_router
 from telemetry.router import router as telemetry_router
 from telemetry.report import router as report_router
 
@@ -64,6 +66,12 @@ app = FastAPI(title="Brasaland Supplier Directory API", version="1.0.0", lifespa
 
 @app.middleware("http")
 async def timing_middleware(request: Request, call_next):
+    # Las rutas WebSocket no pueden pasar por middlewares HTTP de FastAPI:
+    # el middleware espera una Response, pero el WebSocket devuelve un
+    # Upgrade. Detectamos por el header "upgrade" en el handshake.
+    if "upgrade" in request.headers and request.headers["upgrade"].lower() == "websocket":
+        return await call_next(request)
+
     start = time.perf_counter()
     response = await call_next(request)
     duration = (time.perf_counter() - start) * 1000  # ms
@@ -99,6 +107,10 @@ async def direct_stock_edit_guard(request: Request, call_next):
     El modelo de negocio de Brasaland exige que toda modificación de stock
     pase por InboundOrder (entrada) u OutboundOrder (salida).
     """
+    # Saltar handshakes WebSocket (no producen Response HTTP)
+    if "upgrade" in request.headers and request.headers["upgrade"].lower() == "websocket":
+        return await call_next(request)
+
     path = request.url.path
     method = request.method
 
@@ -152,6 +164,8 @@ app.include_router(profiles_router)
 app.include_router(incidents_router)
 app.include_router(inventory_router)
 app.include_router(knowledge_router)
+app.include_router(rfp_router)
+app.include_router(chat_router)
 app.include_router(telemetry_router)
 app.include_router(report_router)
 app.include_router(reporting_router)
