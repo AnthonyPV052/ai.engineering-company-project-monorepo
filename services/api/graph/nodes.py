@@ -13,7 +13,11 @@ from graph.incident_tool_adapter import (
     lookup_incident,
     _INCIDENT_LIST_LIMIT,
 )
-from graph.routing import route_sources
+from graph.routing import (
+    route_sources,
+    _EXPLICIT_MEMORY_INTENT,
+    _MEMORY_RECALL_INTENT,
+)
 
 from data.pipelines.rag import (
     retrieve,
@@ -207,7 +211,10 @@ def incident_answer_node(state: AgentState) -> dict[str, object]:
 
 
 def generate_node(state: AgentState) -> dict[str, object]:
-    if not state.get("context") and not state.get("incident") and not state.get("incidents"):
+    memory_recall = bool(_MEMORY_RECALL_INTENT.search(state["question"]))
+    explicit_memory_request = bool(_EXPLICIT_MEMORY_INTENT.search(state["question"]))
+    if (not state.get("context") and not state.get("incident") and not state.get("incidents")
+            and not memory_recall and not explicit_memory_request):
         # A proposal decision may be bundled with an ordinary question. Keep
         # the normal no-context answer for that question, but report the
         # proposal outcome rather than silently dropping it.
@@ -253,10 +260,21 @@ def generate_node(state: AgentState) -> dict[str, object]:
     context = list(state["context"])
     session_id = state.get("session_id", state["trace_id"])
     try:
-        memories = search_memories(state["question"], location_filter=None)
+        # Broad recall phrasing may omit the topic itself (e.g. "¿Recuerdas
+        # algo sobre el gerente de Medellín?"). Use a lower, still positive
+        # threshold only for explicit recall; normal queries retain 0.85.
+        search_options = {"location_filter": None}
+        if memory_recall:
+            search_options["threshold"] = 0.60
+        memories = search_memories(state["question"], **search_options)
     except Exception:
         logger.exception("No se pudo recuperar la memoria episódica (BD no disponible)")
         memories = []
+
+    if memory_recall and not state.get("context") and not memories:
+        output = {"answer": "No encontré información suficiente en la base de conocimiento ni memorias aprobadas relacionadas."}
+        record_node(state, "generate", output)
+        return output
 
     # Para consultas mixtas: añadir la lista de incidencias al contexto del RAG
     incidents = state.get("incidents")
@@ -293,11 +311,6 @@ def generate_node(state: AgentState) -> dict[str, object]:
                 if key in {"id", "title", "description", "status", "category", "origin", "branch", "created_at", "updated_at"}
             ),
         })
-    try:
-        memories = search_memories(state["question"], location_filter=None)
-    except Exception:
-        logger.exception("No se pudo recuperar la memoria episódica")
-        memories = []
     try:
         answer, suggestion = generate_answer_with_memory(
             state["question"], context,

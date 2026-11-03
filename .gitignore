@@ -6,3 +6,6 @@ __pycache__/
 Telemetry-context.md
 *.local*
 agent-traces/
+data/raw
+*.db
+rfp-requests/
