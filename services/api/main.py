@@ -3,11 +3,13 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import OperationalError
+
+from security import get_current_user
 
 from database import init_db
 from routes.auth import router as auth_router
@@ -17,6 +19,8 @@ from routes.knowledge import router as knowledge_router
 from routes.profiles import router as profiles_router
 from routes.suppliers import router as suppliers_router
 from routes.users import router as users_router
+from routes.rfp import router as rfp_router
+from chat.ws import router as chat_router
 from telemetry.router import router as telemetry_router
 from telemetry.report import router as report_router
 
@@ -33,6 +37,7 @@ from fastapi import Request
 from telemetry_util import emit_api_perf_event, emit_api_error_event, emit_telemetry_event
 from celery.result import AsyncResult
 from celery_app import celery_app
+from starlette.middleware.base import BaseHTTPMiddleware
 
 logger = logging.getLogger("api.timing")
 
@@ -64,6 +69,12 @@ app = FastAPI(title="Brasaland Supplier Directory API", version="1.0.0", lifespa
 
 @app.middleware("http")
 async def timing_middleware(request: Request, call_next):
+    # Las rutas WebSocket no pueden pasar por middlewares HTTP de FastAPI:
+    # el middleware espera una Response, pero el WebSocket devuelve un
+    # Upgrade. Detectamos por el header "upgrade" en el handshake.
+    if "upgrade" in request.headers and request.headers["upgrade"].lower() == "websocket":
+        return await call_next(request)
+
     start = time.perf_counter()
     response = await call_next(request)
     duration = (time.perf_counter() - start) * 1000  # ms
@@ -99,6 +110,10 @@ async def direct_stock_edit_guard(request: Request, call_next):
     El modelo de negocio de Brasaland exige que toda modificación de stock
     pase por InboundOrder (entrada) u OutboundOrder (salida).
     """
+    # Saltar handshakes WebSocket (no producen Response HTTP)
+    if "upgrade" in request.headers and request.headers["upgrade"].lower() == "websocket":
+        return await call_next(request)
+
     path = request.url.path
     method = request.method
 
@@ -141,9 +156,57 @@ app.add_middleware(
         "http://127.0.0.1:4011",
     ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "X-Requested-With",
+        "Accept",
+        "Origin",
+    ],
 )
+
+
+# ---------------------------------------------------------------------------
+# Middleware de seguridad: headers HTTP de protección
+# ---------------------------------------------------------------------------
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Agrega encabezados de seguridad HTTP a todas las respuestas.
+
+    Implementa las recomendaciones de OWASP para hardening de headers:
+    - HSTS: obliga conexión HTTPS
+    - X-Content-Type-Options: evita MIME sniffing
+    - X-Frame-Options: evita clickjacking
+    - Content-Security-Policy: restringe orígenes de contenido
+    - Referrer-Policy: controla información de referer
+    - Permissions-Policy: restringe APIs del navegador
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data:; "
+            "connect-src 'self'; "
+            "frame-ancestors 'none';"
+        )
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = (
+            "camera=(), microphone=(), geolocation=(), "
+            "payment=(), usb=(), bluetooth=()"
+        )
+        return response
+
+
+app.add_middleware(SecurityHeadersMiddleware)
+
 
 app.include_router(suppliers_router)
 app.include_router(auth_router)
@@ -152,6 +215,8 @@ app.include_router(profiles_router)
 app.include_router(incidents_router)
 app.include_router(inventory_router)
 app.include_router(knowledge_router)
+app.include_router(rfp_router)
+app.include_router(chat_router)
 app.include_router(telemetry_router)
 app.include_router(report_router)
 app.include_router(reporting_router)
@@ -159,7 +224,7 @@ app.include_router(memory_router)
 
 
 @app.get("/tasks/{task_id}")
-def get_task_status(task_id: str) -> dict[str, object]:
+def get_task_status(task_id: str, current_user: dict = Depends(get_current_user)) -> dict[str, object]:
     """Consulta el estado real de Celery y su resultado cuando termina."""
     result = AsyncResult(task_id, app=celery_app)
     state = result.status.lower()

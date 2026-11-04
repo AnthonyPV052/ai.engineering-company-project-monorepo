@@ -11,7 +11,7 @@ celery_app = Celery(
     "brasaland",
     broker=REDIS_URL,
     backend=REDIS_URL,
-    include=["tasks"],
+    include=["tasks", "rfp_tasks"],
 )
 celery_app.conf.update(
     task_track_started=True,

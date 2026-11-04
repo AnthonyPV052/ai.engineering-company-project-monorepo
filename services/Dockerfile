@@ -17,6 +17,18 @@ COPY services/reporting/ /app/reporting/
 COPY data/ /app/data/
 COPY docs/company-knowledge-base/ /app/docs/company-knowledge-base/
 
+# Create non-root user and set up directory permissions
+RUN addgroup --system --gid 1001 brasaland && \
+    adduser --system --uid 1001 --ingroup brasaland --no-create-home brasaland && \
+    mkdir -p /app/data /app/logs && \
+    chown -R brasaland:brasaland /app && \
+    chmod 755 /app && \
+    chmod 750 /app/data && \
+    chmod 750 /app/logs
+
+# Switch to non-root user
+USER brasaland
+
 # Expose the port the API runs on
 EXPOSE 8020
 
