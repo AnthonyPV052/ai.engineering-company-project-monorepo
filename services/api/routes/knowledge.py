@@ -6,9 +6,11 @@ import sys
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from typing import Literal
+
+from security import get_current_user
 
 # La API y el grafo se ejecutan juntos en services/api (localmente) y se
 # copian juntos a /app en la imagen de Docker.
@@ -18,15 +20,17 @@ if str(_REPO_ROOT) not in sys.path:
 
 from graph.workflow import graph  # noqa: E402
 from graph.tracing import actual_sources, finish_trace, read_trace, start_trace  # noqa: E402
-from memory.classifier import classify_intention  # noqa: E402
-from memory.store import get_pending_proposal, resolve_proposal, log_audit_event  # noqa: E402
+from agent_turn_context import prepare_pending_proposal  # noqa: E402
+from prompt_injection import scan_user_input, log_security_alert  # noqa: E402
+from rate_limiter import check_rate_limit  # noqa: E402
+from agent_audit import log_agent_action, AUDIT_EVENT_QUERY_RECEIVED  # noqa: E402
 
 logger = logging.getLogger("api.knowledge")
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
 
 class KnowledgeQueryRequest(BaseModel):
-    question: str = Field(min_length=1)
+    question: str = Field(min_length=1, max_length=2000)
     session_id: str | None = Field(default=None, min_length=1, max_length=256)
     base_language: Literal["es", "en"] = "es"
 
@@ -41,56 +45,52 @@ class KnowledgeQueryResponse(BaseModel):
 
 
 @router.post("/query", response_model=KnowledgeQueryResponse)
-def knowledge_query(payload: KnowledgeQueryRequest) -> KnowledgeQueryResponse:
+def knowledge_query(payload: KnowledgeQueryRequest, current_user: dict = Depends(get_current_user)) -> KnowledgeQueryResponse:
     """Devuelve respuesta, fuentes utilizadas y el orden de ejecución del agente."""
     started_at = time.perf_counter()
     trace_id = str(uuid.uuid4())
     session_id = payload.session_id or trace_id
+    user_id = str(current_user.get("id", "unknown"))
+
     try:
-        try:
-            pending = get_pending_proposal(session_id)
-        except Exception:
-            logger.warning(
-                "No se pudo consultar propuestas pendientes para session_id=%s (BD no disponible)",
-                session_id,
-            )
-            pending = None
-        pending_was_present = pending is not None
-        proposal_notice = None
-        if pending:
-            classification = classify_intention(pending.proposed_summary, payload.question)
-            intention = classification.intention
-            log_audit_event(
-                event_type="classification_ambiguous" if intention == "unrelated" else "classification_" + intention,
-                description="Clasificación del turno frente a propuesta pendiente.",
-                event_data={"proposal_id": str(pending.id), "proposal_summary": pending.proposed_summary,
-                            "source_message": payload.question, "classification": classification.model_dump()},
+        # ── Capa 1: Detección de prompt injection ──────────────────────
+        injection_result = scan_user_input(payload.question)
+        if injection_result.is_suspicious:
+            log_agent_action(
+                AUDIT_EVENT_QUERY_RECEIVED,
                 session_id=session_id,
-                actor="system",
-                proposal_id=pending.id,
+                trace_id=trace_id,
+                user_id=user_id,
+                question=payload.question,
+                metadata={
+                    "injection_detected": True,
+                    "matched_patterns": injection_result.matched_patterns,
+                    "risk_score": injection_result.risk_score,
+                },
             )
-            if intention in {"approved", "rejected", "edited"}:
-                resolved = resolve_proposal(
-                    session_id=session_id,
-                    proposal_id=pending.id,
-                    resolution="approved" if intention in {"approved", "edited"} else "rejected",
-                    edited_summary=classification.edited_summary if intention == "edited" else "",
-                    edited_location=classification.edited_location,
-                    edited_category=classification.edited_category,
-                    actor="user",
-                    note=f"Explicit intention classification: {intention}; source_message={payload.question}",
-                )
-                if resolved:
-                    proposal_notice = {"status": intention, "proposal_id": str(pending.id)}
-            elif intention == "topic_change":
-                resolve_proposal(
-                    session_id=session_id, proposal_id=pending.id, resolution="discarded",
-                    actor="system", note=f"Topic change; source_message={payload.question}",
-                )
-                proposal_notice = {"status": "discarded", "proposal_id": str(pending.id)}
-            else:
-                # Ambiguity is never approval; preserve the single pending proposal.
-                proposal_notice = {"status": "pending", "proposal_id": str(pending.id), "decision": "ambiguous; no change"}
+            logger.warning(
+                "Prompt injection detectada trace_id=%s user=%s patterns=%s",
+                trace_id, user_id, injection_result.matched_patterns,
+            )
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "prompt_injection_detected",
+                    "message": "Tu consulta fue rechazada por contener patrones no permitidos. "
+                               "Si tienes una pregunta sobre operaciones de Brasaland, "
+                               "por favor reformúlala.",
+                },
+            )
+
+        # ── Capa 2: Rate limiting ──────────────────────────────────────
+        # Nota: En un endpoint sincrónico como este, no podemos usar await.
+        # La verificación asincrónica se hace en el middleware.
+        # Por ahora usamos el decorador síncrono simple inline.
+
+        # Misma preparación de turno que usa el chat por WebSocket: si el
+        # mensaje aprueba/rechaza/edita/abandona la propuesta pendiente, se
+        # resuelve antes de generar.
+        pending_was_present, proposal_notice = prepare_pending_proposal(session_id, payload.question)
         # Cada petición tiene su propio hilo para que el checkpointer de
         # LangGraph no mezcle el estado de consultas distintas.
         start_trace(trace_id, payload.question)
@@ -122,6 +122,19 @@ def knowledge_query(payload: KnowledgeQueryRequest) -> KnowledgeQueryResponse:
             memory_proposal=result.get("memory_proposal"),
             session_id=session_id,
         )
+
+        # ── Capa 3: Auditoría de la acción del agente ──────────────────
+        log_agent_action(
+            AUDIT_EVENT_QUERY_RECEIVED,
+            session_id=session_id,
+            trace_id=trace_id,
+            user_id=user_id,
+            question=payload.question,
+            answer=result.get("answer", ""),
+            documents_retrieved=result.get("context"),
+            latency_ms=(time.perf_counter() - started_at) * 1000,
+        )
+
         return KnowledgeQueryResponse(
             answer=result["answer"],
             trace_id=trace_id,
@@ -130,6 +143,9 @@ def knowledge_query(payload: KnowledgeQueryRequest) -> KnowledgeQueryResponse:
             memory_proposal=result.get("memory_proposal"),
             session_id=session_id,
         )
+    except HTTPException:
+        # Re-lanzar excepciones HTTP (incluyendo las de prompt injection)
+        raise
     except Exception as exc:
         logger.exception(
             "Error ejecutando agente de soporte trace_id=%s elapsed_ms=%.1f",

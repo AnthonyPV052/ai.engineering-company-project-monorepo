@@ -99,7 +99,7 @@ def store_memory(
             INSERT INTO agent_memories
                 (id, summary, location, category, embedding, confidence, approved_by, approved_at, created_at, updated_at)
             VALUES
-                (:id, :summary, :location, :category, CAST(:embedding AS vector(1536)), :confidence, :approved_by, :approved_at, :created_at, :updated_at)
+                (:id, :summary, :location, :category, CAST(:embedding AS vector(1024)), :confidence, :approved_by, :approved_at, :created_at, :updated_at)
         """), {
             "id": memory_id, "summary": summary, "location": location, "category": category,
             "embedding": json.dumps(embedding_vector), "confidence": confidence,
@@ -158,11 +158,11 @@ def search_memories(
             location,
             category,
             confidence,
-            1 - (embedding <=> CAST(:query_embedding AS vector(1536))) AS score,
+            1 - (embedding <=> CAST(:query_embedding AS vector(1024))) AS score,
             usage_count
         FROM agent_memories
         WHERE {where_clause}
-          AND 1 - (embedding <=> CAST(:query_embedding AS vector(1536))) > :threshold
+          AND 1 - (embedding <=> CAST(:query_embedding AS vector(1024))) > :threshold
         ORDER BY score DESC
         LIMIT :limit
     """)
@@ -325,15 +325,15 @@ def resolve_proposal(
             confidence = proposal.proposed_confidence if edited_confidence == 0.8 else edited_confidence
             validate_memory_fact(summary, category)
             vector = _compute_embedding(summary)
-            if len(vector) != 1536:
-                raise ValueError("El embedding debe tener 1536 dimensiones")
+            if len(vector) != 1024:
+                raise ValueError("El embedding debe tener 1024 dimensiones")
             memory_id = uuid4()
             now = datetime.now(timezone.utc)
             session.execute(text("""
                 INSERT INTO agent_memories
                     (id, summary, location, category, embedding, confidence, approved_by, approved_at, created_at, updated_at)
                 VALUES
-                    (:id, :summary, :location, :category, CAST(:embedding AS vector(1536)), :confidence, :approved_by, :approved_at, :created_at, :updated_at)
+                    (:id, :summary, :location, :category, CAST(:embedding AS vector(1024)), :confidence, :approved_by, :approved_at, :created_at, :updated_at)
             """), {
                 "id": memory_id, "summary": summary, "location": location, "category": category,
                 "embedding": json.dumps(vector), "confidence": confidence, "approved_by": actor,

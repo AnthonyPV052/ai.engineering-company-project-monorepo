@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import Counter
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from tinydb import Query as TinyQuery
 
 from cache import cached, invalidate_cache
@@ -19,8 +19,9 @@ from incident_models import (
     IncidentStored,
     IncidentSummaryResponse,
 )
+from security import get_current_user
 
-router = APIRouter(prefix="/api/incidents", tags=["incidents"])
+router = APIRouter(prefix="/api/incidents", tags=["incidents"], dependencies=[Depends(get_current_user)])
 
 ALLOWED_STATUS_TRANSITIONS = {
     IncidentStatus.open.value: {IncidentStatus.in_progress.value, IncidentStatus.discarded.value},

@@ -11,7 +11,7 @@ for path in (ROOT, API_DIR):
     if str(path) not in sys.path:
         sys.path.insert(0, str(path))
 
-from graph.routing import route_sources  # noqa: E402
+from graph.routing import route_sources, route_context  # noqa: E402
 from graph.incident_tool_adapter import IncidentToolInput, IncidentToolOutput  # noqa: E402
 from graph.nodes import generate_node, no_context_node, retrieve_node  # noqa: E402
 
@@ -32,6 +32,145 @@ def test_knowledge_question_routes_to_rag_without_incident_tool() -> None:
     route = route_sources(_state("¿Qué alérgenos tiene la Ensalada Tropical?"))
 
     assert route == "rag_only"
+
+
+def test_memory_recall_question_routes_to_generation_without_rag_context() -> None:
+    state = {
+        "question": "¿Recuerdas algo sobre el gerente de Medellín?",
+        "context": [],
+        "route": "rag_only",
+    }
+
+    assert route_context(state) == "generate"
+
+
+def test_explicit_remember_request_routes_to_generation_without_rag_context() -> None:
+    state = {
+        "question": "Recuerda esto: Dejamos de ofrecer La Ensalada Tropical en la sede de Medellín.",
+        "context": [],
+        "route": "rag_only",
+    }
+
+    assert route_context(state) == "generate"
+
+
+def test_non_recall_question_without_context_keeps_no_context_route() -> None:
+    state = {"question": "¿Cuál es el clima hoy?", "context": [], "route": "rag_only"}
+
+    assert route_context(state) == "no_context"
+
+
+def test_memory_recall_passes_only_search_results_to_answer_generator(monkeypatch) -> None:
+    from types import SimpleNamespace
+    import graph.nodes as nodes
+    from memory.generation import MemorySuggestion
+
+    approved_memory = SimpleNamespace(
+        summary="El gerente de Medellín prefiere reportes de incidencias por WhatsApp.",
+        location="Medellín",
+        category="preferencias",
+    )
+    captured = {}
+
+    search_call = {}
+
+    def fake_search(*args, **kwargs):
+        search_call.update(kwargs)
+        return [approved_memory]
+
+    monkeypatch.setattr(nodes, "search_memories", fake_search)
+
+    def fake_generate(question, context, memory_context=None, base_language="es"):
+        captured["memory_context"] = memory_context
+        return "La preferencia guardada es WhatsApp.", MemorySuggestion()
+
+    monkeypatch.setattr(nodes, "generate_answer_with_memory", fake_generate)
+    state = {
+        "question": "¿Recuerdas algo sobre el gerente de Medellín?",
+        "context": [],
+        "answer": "",
+        "trace_id": "test-memory-recall",
+        "route": "rag_only",
+    }
+
+    update = generate_node(state)
+
+    assert update["answer"] == "La preferencia guardada es WhatsApp."
+    assert captured["memory_context"] == [{
+        "summary": approved_memory.summary,
+        "location": "Medellín",
+        "category": "preferencias",
+    }]
+    assert search_call["threshold"] == 0.60
+
+
+def test_memory_recall_without_matches_does_not_invoke_generator(monkeypatch) -> None:
+    import graph.nodes as nodes
+
+    monkeypatch.setattr(nodes, "search_memories", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        nodes, "generate_answer_with_memory",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("generator should not run")),
+    )
+    state = {
+        "question": "¿Recuerdas algo sobre el gerente de Medellín?",
+        "context": [],
+        "answer": "",
+        "trace_id": "test-memory-recall-empty",
+        "route": "rag_only",
+    }
+
+    update = generate_node(state)
+
+    assert "ni memorias aprobadas" in update["answer"]
+
+
+def test_explicit_remember_request_generates_and_creates_proposal(monkeypatch) -> None:
+    from types import SimpleNamespace
+    import graph.nodes as nodes
+    from memory.generation import MemorySuggestion
+
+    monkeypatch.setattr(nodes, "search_memories", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        nodes,
+        "generate_answer_with_memory",
+        lambda *args, **kwargs: (
+            "Entendido, propongo guardar el cambio.",
+            MemorySuggestion(
+                should_store=True,
+                summary="La Ensalada Tropical dejó de ofrecerse en la sede de Medellín.",
+                location="Medellín",
+                category="general",
+                confidence=0.9,
+            ),
+        ),
+    )
+    created = {}
+
+    def fake_create_proposal(**kwargs):
+        created.update(kwargs)
+        return SimpleNamespace(
+            id="proposal-1",
+            proposed_summary=kwargs["summary"],
+        )
+
+    monkeypatch.setattr(nodes, "create_proposal", fake_create_proposal)
+    state = {
+        "question": "Recuerda esto: Dejamos de ofrecer La Ensalada Tropical en la sede de Medellín.",
+        "context": [],
+        "answer": "",
+        "trace_id": "test-explicit-memory-request",
+        "session_id": "test-session",
+        "route": "rag_only",
+        "base_language": "es",
+    }
+
+    update = generate_node(state)
+
+    assert update["memory_proposal"]["status"] == "pending"
+    assert update["memory_proposal"]["summary"] == created["summary"]
+    assert created["location"] == "Medellín"
+    assert "Responde sí para guardarlo" in update["answer"]
 
 
 def test_request_for_ticket_and_procedure_routes_tool_then_rag() -> None:
@@ -171,7 +310,7 @@ def test_mixed_request_keeps_confirmed_incident_if_rag_fails(monkeypatch) -> Non
     def fail_generation(*args, **kwargs):
         raise ConnectionError("gateway DNS is unavailable")
 
-    monkeypatch.setattr(nodes, "generate_answer", fail_generation)
+    monkeypatch.setattr(nodes, "generate_answer_with_memory", fail_generation)
     state = {
         "question": "estado del ticket ABC-123 y procedimiento de resolución",
         "context": [],

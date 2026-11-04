@@ -18,10 +18,10 @@ services:
       - "8020:8020"
     environment:
       - DATABASE_URL=${DATABASE_URL}
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-dev-secret-key}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY is required. Set it in .env or export it.}
       - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
       - APP_BASE_URL=http://frontend:3000
-      - REDIS_URL=redis://host.docker.internal:6379/0
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@host.docker.internal:6379/0
       - QDRANT_URL=${QDRANT_URL:-http://host.docker.internal:6333}
       - LLM_GATEWAY=${LLM_GATEWAY}
       - LLM_API_KEY=${LLM_API_KEY}
@@ -54,7 +54,7 @@ services:
       - /app/.venv
     environment:
       - DATABASE_URL=${DATABASE_URL}
-      - REDIS_URL=redis://host.docker.internal:6379/0
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@host.docker.internal:6379/0
       - QDRANT_URL=${QDRANT_URL:-http://host.docker.internal:6333}
       - LLM_GATEWAY=${LLM_GATEWAY}
       - LLM_API_KEY=${LLM_API_KEY}
@@ -88,7 +88,7 @@ services:
     container_name: brasaland-redis
     ports:
       - "6379:6379"
-    command: ["redis-server", "--maxmemory-policy", "noeviction"]
+    command: ["redis-server", "--maxmemory-policy", "noeviction", "--requirepass", "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"]
     networks:
       - brasaland-net
 
@@ -98,15 +98,16 @@ services:
     ports:
       - "5555:5555"
     environment:
-      - CELERY_BROKER_URL=redis://host.docker.internal:6379/0
-      - CELERY_RESULT_BACKEND=redis://host.docker.internal:6379/0
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@host.docker.internal:6379/0
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@host.docker.internal:6379/0
+      - FLOWER_BASIC_AUTH=${FLOWER_USER:-admin}:${FLOWER_PASSWORD:?FLOWER_PASSWORD is required}
     depends_on:
       - redis
     networks:
       - brasaland-net
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    command: ["celery", "--broker=redis://host.docker.internal:6379/0", "flower", "--port=5555"]
+    command: ["celery", "--broker=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@host.docker.internal:6379/0", "flower", "--port=5555", "--basic_auth=${FLOWER_USER:-admin}:${FLOWER_PASSWORD:?FLOWER_PASSWORD is required}"]
 
   frontend:
     # Backend/worker use the default bridge to avoid brasaland-net's broken
@@ -148,7 +149,7 @@ services:
       - MCP_BRASALAND_PORT=8100
       - MCP_BRASALAND_API_BASE_URL=http://host.docker.internal:8020
       - MCP_BRASALAND_USE_FALLBACK_AUTH=true
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-dev-secret-key}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:?JWT_SECRET_KEY is required. Set it in .env or export it.}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     extra_hosts:
       - "host.docker.internal:host-gateway"
